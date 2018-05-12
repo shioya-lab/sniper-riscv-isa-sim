@@ -703,6 +703,7 @@ enable_stow
 enable_optional_subprojects
 with_isa
 with_fesvr
+with_sift
 enable_commitlog
 enable_histogram
 enable_dirty
@@ -1362,6 +1363,7 @@ Optional Packages:
   --with-isa=RV64IMAFDC   Sets the default RISC-V ISA
   --with-fesvr            path to your fesvr installation if not in a standard
                           location
+  --with-sift             path to your Sniper installation
 
 Some influential environment variables:
   CC          C compiler command
@@ -4598,6 +4600,115 @@ _ACEOF
 
 else
   as_fn_error $? "libfesvr is required" "$LINENO" 5
+fi
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for deflate in -lz" >&5
+$as_echo_n "checking for deflate in -lz... " >&6; }
+if ${ac_cv_lib_z_deflate+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lz  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char deflate ();
+int
+main ()
+{
+return deflate ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_cxx_try_link "$LINENO"; then :
+  ac_cv_lib_z_deflate=yes
+else
+  ac_cv_lib_z_deflate=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_z_deflate" >&5
+$as_echo "$ac_cv_lib_z_deflate" >&6; }
+if test "x$ac_cv_lib_z_deflate" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_LIBZ 1
+_ACEOF
+
+  LIBS="-lz $LIBS"
+
+else
+  as_fn_error $? "libz is required" "$LINENO" 5
+fi
+
+
+
+# Check whether --with-sift was given.
+if test "${with_sift+set}" = set; then :
+  withval=$with_sift;
+    LDFLAGS="-L$withval/sift $LDFLAGS"
+    CPPFLAGS="-I$withval/sift $CPPFLAGS"
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for _ZN4Sift6WriterD1Ev in -lsift" >&5
+$as_echo_n "checking for _ZN4Sift6WriterD1Ev in -lsift... " >&6; }
+if ${ac_cv_lib_sift__ZN4Sift6WriterD1Ev+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lsift  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char _ZN4Sift6WriterD1Ev ();
+int
+main ()
+{
+return _ZN4Sift6WriterD1Ev ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_cxx_try_link "$LINENO"; then :
+  ac_cv_lib_sift__ZN4Sift6WriterD1Ev=yes
+else
+  ac_cv_lib_sift__ZN4Sift6WriterD1Ev=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_sift__ZN4Sift6WriterD1Ev" >&5
+$as_echo "$ac_cv_lib_sift__ZN4Sift6WriterD1Ev" >&6; }
+if test "x$ac_cv_lib_sift__ZN4Sift6WriterD1Ev" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_LIBSIFT 1
+_ACEOF
+
+  LIBS="-lsift $LIBS"
+
+else
+  as_fn_error $? "unable to find libsift" "$LINENO" 5
+fi
+
+
+$as_echo "#define RISCV_ENABLE_SIFT /**/" >>confdefs.h
+
+
+
 fi
 
 

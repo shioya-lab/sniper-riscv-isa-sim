@@ -20,9 +20,10 @@
 #define STATE state
 
 processor_t::processor_t(const char* isa, simif_t* sim, uint32_t id,
-        bool halt_on_reset)
+        bool halt_on_reset, const char* sift_filename)
   : debug(false), halt_request(false), sim(sim), ext(NULL), id(id),
-  halt_on_reset(halt_on_reset), last_pc(1), executions(1)
+  halt_on_reset(halt_on_reset), last_pc(1), executions(1),
+  reset_count(0), sift_filename(sift_filename)
 {
   parse_isa_string(isa);
   register_base_instructions();
@@ -41,6 +42,14 @@ processor_t::~processor_t()
     fprintf(stderr, "PC Histogram size:%zu\n", pc_histogram.size());
     for (auto it : pc_histogram)
       fprintf(stderr, "%0" PRIx64 " %" PRIu64 "\n", it.first, it.second);
+  }
+#endif
+
+#ifdef RISCV_ENABLE_SIFT
+  if (state.log_writer)
+  {
+    delete state.log_writer;
+    state.log_writer = nullptr;
   }
 #endif
 
@@ -115,8 +124,23 @@ void processor_t::parse_isa_string(const char* str)
   max_isa = state.misa;
 }
 
-void state_t::reset(reg_t max_isa)
+void getCode(uint8_t *dst, const uint8_t *src, uint32_t size, void* _mmu)
 {
+  mmu_t *mmu = reinterpret_cast<mmu_t*>(_mmu);
+  for (uint32_t i = 0 ; i < size ; ++i)
+  {
+    dst[i] = mmu->load_uint8(reinterpret_cast<reg_t>(src)+i);
+  }
+}
+
+void state_t::reset(reg_t max_isa, mmu_t *mmu, uint32_t id, uint32_t reset_count, const char* sift_filename)
+{
+#ifdef RISCV_ENABLE_SIFT
+  if (log_writer) {
+    delete log_writer;
+    log_writer = nullptr;
+  }
+#endif
   memset(this, 0, sizeof(*this));
   misa = max_isa;
   prv = PRV_M;
@@ -125,6 +149,15 @@ void state_t::reset(reg_t max_isa)
   tselect = 0;
   for (unsigned int i = 0; i < num_triggers; i++)
     mcontrol[i].type = 2;
+#ifdef RISCV_ENABLE_SIFT
+  std::string filename = std::string(sift_filename)+"_h"+std::to_string(log_id);
+  if (log_reset_count)
+  {
+    filename += ("_r"+std::to_string(log_reset_count));
+  }
+  filename += ".sift";
+  log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));;
+#endif
 }
 
 void processor_t::set_debug(bool value)
@@ -147,7 +180,7 @@ void processor_t::set_histogram(bool value)
 
 void processor_t::reset()
 {
-  state.reset(max_isa);
+  state.reset(max_isa, mmu, id, reset_count, sift_filename);
   state.dcsr.halt = halt_on_reset;
   halt_on_reset = false;
   set_csr(CSR_MSTATUS, state.mstatus);
@@ -157,6 +190,8 @@ void processor_t::reset()
 
   if (sim)
     sim->proc_reset(id);
+
+  reset_count++;
 }
 
 // Count number of contiguous 0 bits starting from the LSB.

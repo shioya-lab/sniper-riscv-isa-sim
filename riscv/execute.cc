@@ -4,6 +4,9 @@
 #include "mmu.h"
 #include <cassert>
 
+#ifdef RISCV_ENABLE_SIFT
+# include "sift_writer.h"
+#endif
 
 static void commit_log_stash_privilege(processor_t* p)
 {
@@ -69,6 +72,23 @@ inline void processor_t::update_histogram(reg_t pc)
 #endif
 }
 
+static void log_print_sift_trace(state_t* state, reg_t pc, insn_t insn)
+{
+#ifdef RISCV_ENABLE_SIFT
+  uint64_t addr = pc;
+  uint64_t size = insn.length();
+  uint8_t  num_addresses = state->log_addr_valid; // true -> 1, false -> 0
+  uint64_t addresses[1] = {state->log_addr};
+  bool     is_branch = state->log_is_branch;
+  bool     taken = state->log_is_branch_taken;
+  state->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
+  state->log_addr = 0;
+  state->log_addr_valid = false;
+  state->log_is_branch = false;
+  state->log_is_branch_taken = false;
+#endif
+}
+
 // This is expected to be inlined by the compiler so each use of execute_insn
 // includes a duplicated body of the function to get separate fetch.func
 // function calls.
@@ -78,6 +98,7 @@ static reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
   reg_t npc = fetch.func(p, fetch.insn, pc);
   if (!invalid_pc(npc)) {
     commit_log_print_insn(p->get_state(), pc, fetch.insn);
+    log_print_sift_trace(p->get_state(), pc, fetch.insn);
     p->update_histogram(pc);
   }
   return npc;

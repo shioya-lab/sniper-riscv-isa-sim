@@ -40,6 +40,9 @@ static void help()
   fprintf(stderr, "  --debug-sba=<bits>    Debug bus master supports up to "
       "<bits> wide accesses [default 0]\n");
   fprintf(stderr, "  --debug-auth          Debug module requires debugger to authenticate\n");
+#ifdef RISCV_ENABLE_SIFT
+  fprintf(stderr, "  --sift=<prefix>       Enable SIFT tracing to <prefix>.sift\n");
+#endif
   exit(1);
 }
 
@@ -95,6 +98,7 @@ int main(int argc, char** argv)
   unsigned max_bus_master_bits = 0;
   bool require_authentication = false;
   std::vector<int> hartids;
+  const char* sift_filename = "spike";
 
   auto const hartids_parser = [&](const char *s) {
     std::string const str(s);
@@ -139,6 +143,9 @@ int main(int argc, char** argv)
       [&](const char* s){max_bus_master_bits = atoi(s);});
   parser.option(0, "debug-auth", 0,
       [&](const char* s){require_authentication = true;});
+#ifdef RISCV_ENABLE_SIFT
+  parser.option(0, "sift", 1, [&](const char* s){sift_filename = s;});
+#endif
 
   auto argv1 = parser.parse(argv);
   std::vector<std::string> htif_args(argv1, (const char*const*)argv + argc);
@@ -146,7 +153,7 @@ int main(int argc, char** argv)
     mems = make_mems("2048");
 
   sim_t s(isa, nprocs, halted, start_pc, mems, htif_args, std::move(hartids),
-      progsize, max_bus_master_bits, require_authentication);
+      progsize, max_bus_master_bits, require_authentication, sift_filename);
   std::unique_ptr<remote_bitbang_t> remote_bitbang((remote_bitbang_t *) NULL);
   std::unique_ptr<jtag_dtm_t> jtag_dtm(new jtag_dtm_t(&s.debug_module));
   if (use_rbb) {
