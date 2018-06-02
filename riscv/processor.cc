@@ -150,12 +150,13 @@ void state_t::reset(reg_t max_isa, mmu_t *mmu, uint32_t id, uint32_t reset_count
   for (unsigned int i = 0; i < num_triggers; i++)
     mcontrol[i].type = 2;
 #ifdef RISCV_ENABLE_SIFT
-  std::string filename = std::string(sift_filename)+"_h"+std::to_string(log_id);
-  if (log_reset_count)
-  {
-    filename += ("_r"+std::to_string(log_reset_count));
-  }
-  filename += ".sift";
+  //std::string filename = std::string(sift_filename)+"_h"+std::to_string(log_id);
+  //if (log_reset_count)
+  //{
+  //  filename += ("_r"+std::to_string(log_reset_count));
+  //}
+  //filename += ".sift";
+  std::string filename = sift_filename;
   log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));;
 #endif
 }
