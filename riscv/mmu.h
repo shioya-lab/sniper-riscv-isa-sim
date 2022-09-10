@@ -97,9 +97,21 @@ public:
 # define READ_MEM(addr, size) ({})
 #endif
 
+  #ifdef RISCV_ENABLE_SIFT
+  # define LOG_ADDR(addr) ({ \
+      if (proc && proc->get_state()) { \
+        proc->get_state()->log_addr = addr; \
+        proc->get_state()->log_addr_valid = true; \
+      } \
+    })
+  #else
+  # define LOG_ADDR(addr) do {} while (false)
+  #endif
+
   // template for functions that load an aligned value from memory
   #define load_func(type, prefix, xlate_flags) \
     type##_t ALWAYS_INLINE prefix##_##type(reg_t addr, bool require_alignment = false) { \
+      LOG_ADDR(addr); \
       if (unlikely(addr & (sizeof(type##_t)-1))) { \
         if (require_alignment) load_reserved_address_misaligned(addr); \
         else return misaligned_load(addr, sizeof(type##_t), xlate_flags); \

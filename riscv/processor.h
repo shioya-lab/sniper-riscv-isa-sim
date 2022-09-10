@@ -125,7 +125,7 @@ struct type_sew_t<64>
 // architectural state of a RISC-V hart
 struct state_t
 {
-  void reset(processor_t* const proc, reg_t max_isa, const char* sift_filename);
+  void reset(processor_t* const proc, reg_t max_isa, mmu_t *mmu, uint32_t id, uint32_t reset_count, const char* sift_filename);
 
   reg_t pc;
   regfile_t<reg_t, NXPR, true> XPR;
@@ -390,6 +390,8 @@ private:
 
   // Track repeated executions for processor_t::disasm()
   uint64_t last_pc, last_bits, executions;
+
+  uint32_t reset_count;
   const char* sift_filename;
 
 public:

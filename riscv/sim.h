@@ -33,6 +33,7 @@ class sim_t : public htif_t, public simif_t
 {
 public:
   sim_t(const cfg_t *cfg, bool halted,
+        std::vector<std::pair<reg_t, mem_t*>> mems,
         std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices,
         const std::vector<std::string>& args,
         const debug_module_config_t &dm_config, const char *log_path,
@@ -40,7 +41,7 @@ public:
 #ifdef HAVE_BOOST_ASIO
         boost::asio::io_service *io_service_ptr_ctor, boost::asio::ip::tcp::acceptor *acceptor_ptr_ctor,  // option -s
 #endif
-          FILE *cmd_file, // needed for command line option --cmd
+        FILE *cmd_file, // needed for command line option --cmd
         const char* sift_filename);
   ~sim_t();
 

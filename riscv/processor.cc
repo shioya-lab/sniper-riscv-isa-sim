@@ -185,8 +185,25 @@ static int xlen_to_uxl(int xlen)
   abort();
 }
 
-void state_t::reset(processor_t* const proc, reg_t max_isa)
+void getCode(uint8_t *dst, const uint8_t *src, uint32_t size, void* _mmu)
 {
+  mmu_t *mmu = reinterpret_cast<mmu_t*>(_mmu);
+  for (uint32_t i = 0 ; i < size ; ++i)
+  {
+    dst[i] = mmu->load_uint8(reinterpret_cast<reg_t>(src)+i);
+  }
+}
+
+
+void state_t::reset(processor_t* const proc, reg_t max_isa, mmu_t *mmu, uint32_t id, uint32_t reset_count, const char* sift_filename)
+{
+#ifdef RISCV_ENABLE_SIFT
+  if (log_writer) {
+    delete log_writer;
+    log_writer = nullptr;
+  }
+#endif
+
   pc = DEFAULT_RSTVEC;
   XPR.reset();
   FPR.reset();
@@ -485,6 +502,17 @@ void state_t::reset(processor_t* const proc, reg_t max_isa)
 
   serialized = false;
 
+#ifdef RISCV_ENABLE_SIFT
+  //std::string filename = std::string(sift_filename)+"_h"+std::to_string(log_id);
+  //if (log_reset_count)
+  //{
+  //  filename += ("_r"+std::to_string(log_reset_count));
+  //}
+  //filename += ".sift";
+  std::string filename = sift_filename;
+  log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));;
+#endif // RISCV_ENABLE_SIFT
+
 #ifdef RISCV_ENABLE_COMMITLOG
   log_reg_write.clear();
   log_mem_read.clear();
@@ -586,7 +614,7 @@ void processor_t::enable_log_commits()
 void processor_t::reset()
 {
   xlen = isa->get_max_xlen();
-  state.reset(this, isa->get_max_isa());
+  state.reset(this, isa->get_max_isa(), mmu, id, reset_count, sift_filename);
   state.dcsr->halt = halt_on_reset;
   halt_on_reset = false;
   VU.reset();

@@ -196,8 +196,8 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
 #ifdef RISCV_ENABLE_COMMITLOG
   commit_log_reset(p);
   commit_log_stash_privilege(p);
-  log_print_sift_trace(p->get_state(), pc, fetch.insn);
 #endif
+
   reg_t npc;
 
   try {
@@ -210,11 +210,14 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
       }
 #endif
 
-     }
+      log_print_sift_trace(p->get_state(), pc, fetch.insn);
+
+    }
 #ifdef RISCV_ENABLE_COMMITLOG
   } catch (wait_for_interrupt_t &t) {
       if (p->get_log_commits_enabled()) {
         commit_log_print_insn(p, pc, fetch.insn);
+        log_print_sift_trace(p->get_state(), pc, fetch.insn);
       }
       throw;
   } catch(mem_trap_t& t) {
@@ -223,6 +226,7 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
         for (auto item : p->get_state()->log_reg_write) {
           if ((item.first & 3) == 3) {
             commit_log_print_insn(p, pc, fetch.insn);
+            log_print_sift_trace(p->get_state(), pc, fetch.insn);
             break;
           }
         }

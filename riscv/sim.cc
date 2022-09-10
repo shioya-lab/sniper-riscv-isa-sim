@@ -38,7 +38,7 @@ sim_t::sim_t(const cfg_t *cfg, bool halted,
 #ifdef HAVE_BOOST_ASIO
              boost::asio::io_service *io_service_ptr, boost::asio::ip::tcp::acceptor *acceptor_ptr, // option -s
 #endif
-        FILE *cmd_file, // needed for command line option --cmd
+             FILE *cmd_file, // needed for command line option --cmd
              const char* sift_filename)
   : htif_t(args),
     isa(cfg->isa(), cfg->priv()),
