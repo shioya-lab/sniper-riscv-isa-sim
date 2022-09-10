@@ -7,10 +7,7 @@
 # error spike requires a two''s-complement c++ implementation
 #endif
 
-#ifdef WORDS_BIGENDIAN
-# error spike requires a little-endian host
-#endif
-
+#include <algorithm>
 #include <cstdint>
 #include <string.h>
 #include <strings.h>
@@ -19,17 +16,31 @@
 #include "common.h"
 #include "softfloat_types.h"
 #include "specialize.h"
+#include "p_ext_macros.h"
+#include "v_ext_macros.h"
 #include <cinttypes>
 
 typedef int64_t sreg_t;
 typedef uint64_t reg_t;
 
+#ifdef __SIZEOF_INT128__
+typedef __int128 int128_t;
+typedef unsigned __int128 uint128_t;
+#endif
+
 const int NXPR = 32;
 const int NFPR = 32;
+const int NVPR = 32;
 const int NCSR = 4096;
 
 #define X_RA 1
 #define X_SP 2
+
+#define VCSR_VXRM_SHIFT 1
+#define VCSR_VXRM  (0x3 << VCSR_VXRM_SHIFT)
+
+#define VCSR_VXSAT_SHIFT 0
+#define VCSR_VXSAT  (0x1 << VCSR_VXSAT_SHIFT)
 
 #define FP_RD_NE  0
 #define FP_RD_0   1
@@ -70,10 +81,11 @@ public:
   insn_t(insn_bits_t bits) : b(bits) {}
   insn_bits_t bits() { return b; }
   int length() { return insn_length(b); }
-  int64_t i_imm() { return int64_t(b) >> 20; }
+  int64_t i_imm() { return xs(20, 12); }
+  int64_t shamt() { return x(20, 6); }
   int64_t s_imm() { return x(7, 5) + (xs(25, 7) << 5); }
-  int64_t sb_imm() { return (x(8, 4) << 1) + (x(25,6) << 5) + (x(7,1) << 11) + (imm_sign() << 12); }
-  int64_t u_imm() { return int64_t(b) >> 12 << 12; }
+  int64_t sb_imm() { return (x(8, 4) << 1) + (x(25, 6) << 5) + (x(7, 1) << 11) + (imm_sign() << 12); }
+  int64_t u_imm() { return xs(12, 20) << 12; }
   int64_t uj_imm() { return (x(21, 10) << 1) + (x(20, 1) << 11) + (x(12, 8) << 12) + (imm_sign() << 20); }
   uint64_t rd() { return x(7, 5); }
   uint64_t rs1() { return x(15, 5); }
@@ -81,6 +93,9 @@ public:
   uint64_t rs3() { return x(27, 5); }
   uint64_t rm() { return x(12, 3); }
   uint64_t csr() { return x(20, 12); }
+  uint64_t iorw() { return x(20, 8); }
+  uint64_t bs() { return x(30, 2); } // Crypto ISE - SM4/AES32 byte select.
+  uint64_t rcon() { return x(20, 4); } // Crypto ISE - AES64 round const.
 
   int64_t rvc_imm() { return x(2, 5) + (xs(12, 1) << 5); }
   int64_t rvc_zimm() { return x(2, 5) + (x(12, 1) << 5); }
@@ -100,11 +115,36 @@ public:
   uint64_t rvc_rs2() { return x(2, 5); }
   uint64_t rvc_rs1s() { return 8 + x(7, 3); }
   uint64_t rvc_rs2s() { return 8 + x(2, 3); }
+
+  uint64_t v_vm() { return x(25, 1); }
+  uint64_t v_wd() { return x(26, 1); }
+  uint64_t v_nf() { return x(29, 3); }
+  uint64_t v_simm5() { return xs(15, 5); }
+  uint64_t v_zimm5() { return x(15, 5); }
+  uint64_t v_zimm10() { return x(20, 10); }
+  uint64_t v_zimm11() { return x(20, 11); }
+  uint64_t v_lmul() { return x(20, 2); }
+  uint64_t v_frac_lmul() { return x(22, 1); }
+  uint64_t v_sew() { return 1 << (x(23, 3) + 3); }
+  uint64_t v_width() { return x(12, 3); }
+  uint64_t v_mop() { return x(26, 2); }
+  uint64_t v_lumop() { return x(20, 5); }
+  uint64_t v_sumop() { return x(20, 5); }
+  uint64_t v_vta() { return x(26, 1); }
+  uint64_t v_vma() { return x(27, 1); }
+  uint64_t v_mew() { return x(28, 1); }
+
+  uint64_t p_imm2() { return x(20, 2); }
+  uint64_t p_imm3() { return x(20, 3); }
+  uint64_t p_imm4() { return x(20, 4); }
+  uint64_t p_imm5() { return x(20, 5); }
+  uint64_t p_imm6() { return x(20, 6); }
+
 private:
   insn_bits_t b;
-  uint64_t x(int lo, int len) { return (b >> lo) & ((insn_bits_t(1) << len)-1); }
-  uint64_t xs(int lo, int len) { return int64_t(b) << (64-lo-len) >> (64-len); }
-  uint64_t imm_sign() { return xs(63, 1); }
+  uint64_t x(int lo, int len) { return (b >> lo) & ((insn_bits_t(1) << len) - 1); }
+  uint64_t xs(int lo, int len) { return int64_t(b) << (64 - lo - len) >> (64 - len); }
+  uint64_t imm_sign() { return xs(31, 1); }
 };
 
 template <class T, size_t N, bool zero_reg>
@@ -120,6 +160,14 @@ public:
   {
     return data[i];
   }
+  regfile_t()
+  {
+    reset();
+  }
+  void reset()
+  {
+    memset(data, 0, sizeof(data));
+  }
 private:
   T data[N];
 };
@@ -127,26 +175,39 @@ private:
 // helpful macros, etc
 #define MMU (*p->get_mmu())
 #define STATE (*p->get_state())
-#define READ_REG(reg) STATE.XPR[reg]
+#define FLEN (p->get_flen())
+#define CHECK_REG(reg) ((void) 0)
+#define READ_REG(reg) ({ CHECK_REG(reg); STATE.XPR[reg]; })
 #define READ_FREG(reg) STATE.FPR[reg]
+#define RD READ_REG(insn.rd())
 #define RS1 READ_REG(insn.rs1())
 #define RS2 READ_REG(insn.rs2())
+#define RS3 READ_REG(insn.rs3())
 #define WRITE_RD(value) WRITE_REG(insn.rd(), value)
 
 #ifndef RISCV_ENABLE_COMMITLOG
-# define WRITE_REG(reg, value) STATE.XPR.write(reg, value)
+# define WRITE_REG(reg, value) ({ CHECK_REG(reg); STATE.XPR.write(reg, value); })
 # define WRITE_FREG(reg, value) DO_WRITE_FREG(reg, freg(value))
+# define WRITE_VSTATUS {}
 #else
+   /* 0 : int
+    * 1 : floating
+    * 2 : vector reg
+    * 3 : vector hint
+    * 4 : csr
+    */
 # define WRITE_REG(reg, value) ({ \
     reg_t wdata = (value); /* value may have side effects */ \
-    STATE.log_reg_write = (commit_log_reg_t){(reg) << 1, {wdata, 0}}; \
+    STATE.log_reg_write[(reg) << 4] = {wdata, 0}; \
+    CHECK_REG(reg); \
     STATE.XPR.write(reg, wdata); \
   })
 # define WRITE_FREG(reg, value) ({ \
     freg_t wdata = freg(value); /* value may have side effects */ \
-    STATE.log_reg_write = (commit_log_reg_t){((reg) << 1) | 1, wdata}; \
+    STATE.log_reg_write[((reg) << 4) | 1] = wdata; \
     DO_WRITE_FREG(reg, wdata); \
   })
+# define WRITE_VSTATUS STATE.log_reg_write[3] = {0, 0};
 #endif
 
 #ifdef RISCV_ENABLE_SIFT
@@ -171,54 +232,141 @@ private:
 #define RVC_SP READ_REG(X_SP)
 
 // FPU macros
+#define READ_ZDINX_REG(reg) (xlen == 32 ? f64(READ_REG_PAIR(reg)) : f64(STATE.XPR[reg] & (uint64_t)-1))
+#define READ_FREG_H(reg) (p->extension_enabled(EXT_ZFINX) ? f16(STATE.XPR[reg] & (uint16_t)-1) : f16(READ_FREG(reg)))
+#define READ_FREG_F(reg) (p->extension_enabled(EXT_ZFINX) ? f32(STATE.XPR[reg] & (uint32_t)-1) : f32(READ_FREG(reg)))
+#define READ_FREG_D(reg) (p->extension_enabled(EXT_ZFINX) ? READ_ZDINX_REG(reg) : f64(READ_FREG(reg)))
 #define FRS1 READ_FREG(insn.rs1())
 #define FRS2 READ_FREG(insn.rs2())
 #define FRS3 READ_FREG(insn.rs3())
-#define dirty_fp_state (STATE.mstatus |= MSTATUS_FS | (xlen == 64 ? MSTATUS64_SD : MSTATUS32_SD))
-#define dirty_ext_state (STATE.mstatus |= MSTATUS_XS | (xlen == 64 ? MSTATUS64_SD : MSTATUS32_SD))
+#define FRS1_H READ_FREG_H(insn.rs1())
+#define FRS1_F READ_FREG_F(insn.rs1())
+#define FRS1_D READ_FREG_D(insn.rs1())
+#define FRS2_H READ_FREG_H(insn.rs2())
+#define FRS2_F READ_FREG_F(insn.rs2())
+#define FRS2_D READ_FREG_D(insn.rs2())
+#define FRS3_H READ_FREG_H(insn.rs3())
+#define FRS3_F READ_FREG_F(insn.rs3())
+#define FRS3_D READ_FREG_D(insn.rs3())
+#define dirty_fp_state  STATE.sstatus->dirty(SSTATUS_FS)
+#define dirty_ext_state STATE.sstatus->dirty(SSTATUS_XS)
+#define dirty_vs_state  STATE.sstatus->dirty(SSTATUS_VS)
 #define DO_WRITE_FREG(reg, value) (STATE.FPR.write(reg, value), dirty_fp_state)
 #define WRITE_FRD(value) WRITE_FREG(insn.rd(), value)
+#define WRITE_FRD_H(value) \
+do { \
+  if (p->extension_enabled(EXT_ZFINX)) \
+    WRITE_REG(insn.rd(), sext_xlen((int16_t)((value).v))); \
+  else { \
+    WRITE_FRD(value); \
+  } \
+} while (0)
+#define WRITE_FRD_F(value) \
+do { \
+  if (p->extension_enabled(EXT_ZFINX)) \
+    WRITE_REG(insn.rd(), sext_xlen((value).v)); \
+  else { \
+    WRITE_FRD(value); \
+  } \
+} while (0)
+#define WRITE_FRD_D(value) \
+do { \
+  if (p->extension_enabled(EXT_ZFINX)) { \
+    if (xlen == 32) { \
+      uint64_t val = (value).v; \
+      WRITE_RD_PAIR(val); \
+    } else { \
+      WRITE_REG(insn.rd(), (value).v); \
+    } \
+  } else { \
+    WRITE_FRD(value); \
+  } \
+} while (0)
  
 #define SHAMT (insn.i_imm() & 0x3F)
 #define BRANCH_TARGET (pc + insn.sb_imm())
 #define JUMP_TARGET (pc + insn.uj_imm())
 #define RM ({ int rm = insn.rm(); \
-              if(rm == 7) rm = STATE.frm; \
-              if(rm > 4) throw trap_illegal_instruction(0); \
+              if (rm == 7) rm = STATE.frm->read(); \
+              if (rm > 4) throw trap_illegal_instruction(insn.bits()); \
               rm; })
 
 #define get_field(reg, mask) (((reg) & (decltype(reg))(mask)) / ((mask) & ~((mask) << 1)))
 #define set_field(reg, mask, val) (((reg) & ~(decltype(reg))(mask)) | (((decltype(reg))(val) * ((mask) & ~((mask) << 1))) & (decltype(reg))(mask)))
 
-#define require(x) if (unlikely(!(x))) throw trap_illegal_instruction(0)
 #define require_privilege(p) require(STATE.prv >= (p))
+#define require_novirt() if (unlikely(STATE.v)) throw trap_virtual_instruction(insn.bits())
 #define require_rv64 require(xlen == 64)
 #define require_rv32 require(xlen == 32)
-#define require_extension(s) require(p->supports_extension(s))
-#define require_fp require((STATE.mstatus & MSTATUS_FS) != 0)
-#define require_accelerator require((STATE.mstatus & MSTATUS_XS) != 0)
+#define require_extension(s) require(p->extension_enabled(s))
+#define require_either_extension(A,B) require(p->extension_enabled(A) || p->extension_enabled(B));
+#define require_impl(s) require(p->supports_impl(s))
+#define require_fs          require(STATE.sstatus->enabled(SSTATUS_FS))
+#define require_fp          STATE.fflags->verify_permissions(insn, false)
+#define require_accelerator require(STATE.sstatus->enabled(SSTATUS_XS))
+#define require_vector_vs   require(STATE.sstatus->enabled(SSTATUS_VS))
+#define require_vector(alu) \
+  do { \
+    require_vector_vs; \
+    require_extension('V'); \
+    require(!P.VU.vill); \
+    if (alu && !P.VU.vstart_alu) \
+      require(P.VU.vstart->read() == 0); \
+    WRITE_VSTATUS; \
+    dirty_vs_state; \
+  } while (0);
+#define require_vector_novtype(is_log) \
+  do { \
+    require_vector_vs; \
+    require_extension('V'); \
+    if (is_log) \
+      WRITE_VSTATUS; \
+    dirty_vs_state; \
+  } while (0);
+#define require_align(val, pos) require(is_aligned(val, pos))
+#define require_noover(astart, asize, bstart, bsize) \
+  require(!is_overlapped(astart, asize, bstart, bsize))
+#define require_noover_widen(astart, asize, bstart, bsize) \
+  require(!is_overlapped_widen(astart, asize, bstart, bsize))
+#define require_vm do { if (insn.v_vm() == 0) require(insn.rd() != 0); } while (0);
+#define require_envcfg(field) \
+  do { \
+    if (((STATE.prv != PRV_M) && (m##field == 0)) || \
+        ((STATE.prv == PRV_U && !STATE.v) && (s##field == 0))) \
+      throw trap_illegal_instruction(insn.bits()); \
+    else if (STATE.v && ((h##field == 0) || \
+                        ((STATE.prv == PRV_U) && (s##field == 0)))) \
+      throw trap_virtual_instruction(insn.bits()); \
+  } while (0);
 
 #define set_fp_exceptions ({ if (softfloat_exceptionFlags) { \
-                               dirty_fp_state; \
-                               STATE.fflags |= softfloat_exceptionFlags; \
+                               STATE.fflags->write(STATE.fflags->read() | softfloat_exceptionFlags); \
                              } \
                              softfloat_exceptionFlags = 0; })
 
 #define sext32(x) ((sreg_t)(int32_t)(x))
 #define zext32(x) ((reg_t)(uint32_t)(x))
-#define sext_xlen(x) (((sreg_t)(x) << (64-xlen)) >> (64-xlen))
-#define zext_xlen(x) (((reg_t)(x) << (64-xlen)) >> (64-xlen))
+#define sext_xlen(x) (((sreg_t)(x) << (64 - xlen)) >> (64 - xlen))
+#define zext(x, pos) (((reg_t)(x) << (64 - (pos))) >> (64 - (pos)))
+#define zext_xlen(x) zext(x, xlen)
 
 #define set_pc(x) \
   do { p->check_pc_alignment(x); \
        npc = sext_xlen(x); \
-     } while(0)
+     } while (0)
 
 #define set_pc_and_serialize(x) \
   do { reg_t __npc = (x) & p->pc_alignment_mask(); \
        npc = PC_SERIALIZE_AFTER; \
        STATE.pc = __npc; \
-     } while(0)
+     } while (0)
+
+class wait_for_interrupt_t {};
+
+#define wfi() \
+  do { set_pc_and_serialize(npc); \
+       throw wait_for_interrupt_t(); \
+     } while (0)
 
 #define serialize() set_pc_and_serialize(npc)
 
@@ -228,21 +376,29 @@ private:
 #define invalid_pc(pc) ((pc) & 1)
 
 /* Convenience wrappers to simplify softfloat code sequences */
+#define isBoxedF16(r) (isBoxedF32(r) && ((uint64_t)((r.v[0] >> 16) + 1) == ((uint64_t)1 << 48)))
+#define unboxF16(r) (isBoxedF16(r) ? (uint16_t)r.v[0] : defaultNaNF16UI)
 #define isBoxedF32(r) (isBoxedF64(r) && ((uint32_t)((r.v[0] >> 32) + 1) == 0))
 #define unboxF32(r) (isBoxedF32(r) ? (uint32_t)r.v[0] : defaultNaNF32UI)
 #define isBoxedF64(r) ((r.v[1] + 1) == 0)
 #define unboxF64(r) (isBoxedF64(r) ? r.v[0] : defaultNaNF64UI)
 typedef float128_t freg_t;
+inline float16_t f16(uint16_t v) { return { v }; }
 inline float32_t f32(uint32_t v) { return { v }; }
 inline float64_t f64(uint64_t v) { return { v }; }
+inline float16_t f16(freg_t r) { return f16(unboxF16(r)); }
 inline float32_t f32(freg_t r) { return f32(unboxF32(r)); }
 inline float64_t f64(freg_t r) { return f64(unboxF64(r)); }
 inline float128_t f128(freg_t r) { return r; }
+inline freg_t freg(float16_t f) { return { ((uint64_t)-1 << 16) | f.v, (uint64_t)-1 }; }
 inline freg_t freg(float32_t f) { return { ((uint64_t)-1 << 32) | f.v, (uint64_t)-1 }; }
 inline freg_t freg(float64_t f) { return { f.v, (uint64_t)-1 }; }
 inline freg_t freg(float128_t f) { return f; }
+#define F16_SIGN ((uint16_t)1 << 15)
 #define F32_SIGN ((uint32_t)1 << 31)
 #define F64_SIGN ((uint64_t)1 << 63)
+#define fsgnj16(a, b, n, x) \
+  f16((f16(a).v & ~F16_SIGN) | ((((x) ? f16(a).v : (n) ? F16_SIGN : 0) ^ f16(b).v) & F16_SIGN))
 #define fsgnj32(a, b, n, x) \
   f32((f32(a).v & ~F32_SIGN) | ((((x) ? f32(a).v : (n) ? F32_SIGN : 0) ^ f32(b).v) & F32_SIGN))
 #define fsgnj64(a, b, n, x) \
@@ -270,14 +426,51 @@ inline freg_t f128_negate(freg_t a)
 #define validate_csr(which, write) ({ \
   if (!STATE.serialized) return PC_SERIALIZE_BEFORE; \
   STATE.serialized = false; \
-  unsigned csr_priv = get_field((which), 0x300); \
-  unsigned csr_read_only = get_field((which), 0xC00) == 3; \
-  if (((write) && csr_read_only) || STATE.prv < csr_priv) \
-    throw trap_illegal_instruction(0); \
+  /* permissions check occurs in get_csr */ \
   (which); })
 
-// Seems that 0x0 doesn't work.
-#define DEBUG_START             0x100
-#define DEBUG_END                 (0x1000 - 1)
+/* For debug only. This will fail if the native machine's float types are not IEEE */
+inline float to_f(float32_t f) { float r; memcpy(&r, &f, sizeof(r)); return r; }
+inline double to_f(float64_t f) { double r; memcpy(&r, &f, sizeof(r)); return r; }
+inline long double to_f(float128_t f) { long double r; memcpy(&r, &f, sizeof(r)); return r; }
+
+// Vector macros
+#define e8 8      // 8b elements
+#define e16 16    // 16b elements
+#define e32 32    // 32b elements
+#define e64 64    // 64b elements
+#define e128 128  // 128b elements
+#define e256 256  // 256b elements
+#define e512 512  // 512b elements
+#define e1024 1024  // 1024b elements
+
+#define vsext(x, sew) (((sreg_t)(x) << (64 - sew)) >> (64 - sew))
+#define vzext(x, sew) (((reg_t)(x) << (64 - sew)) >> (64 - sew))
+
+#define DEBUG_RVV 0
+
+#if DEBUG_RVV
+#define DEBUG_RVV_FP_VV \
+  printf("vfp(%lu) vd=%f vs1=%f vs2=%f\n", i, to_f(vd), to_f(vs1), to_f(vs2));
+#define DEBUG_RVV_FP_VF \
+  printf("vfp(%lu) vd=%f vs1=%f vs2=%f\n", i, to_f(vd), to_f(rs1), to_f(vs2));
+#define DEBUG_RVV_FMA_VV \
+  printf("vfma(%lu) vd=%f vs1=%f vs2=%f vd_old=%f\n", i, to_f(vd), to_f(vs1), to_f(vs2), to_f(vd_old));
+#define DEBUG_RVV_FMA_VF \
+  printf("vfma(%lu) vd=%f vs1=%f vs2=%f vd_old=%f\n", i, to_f(vd), to_f(rs1), to_f(vs2), to_f(vd_old));
+#else
+#define DEBUG_RVV_FP_VV 0
+#define DEBUG_RVV_FP_VF 0
+#define DEBUG_RVV_FMA_VV 0
+#define DEBUG_RVV_FMA_VF 0
+#endif
+
+#define DECLARE_XENVCFG_VARS(field) \
+  reg_t m##field = get_field(STATE.menvcfg->read(), MENVCFG_##field); \
+  reg_t s##field = get_field(STATE.senvcfg->read(), SENVCFG_##field); \
+  reg_t h##field = get_field(STATE.henvcfg->read(), HENVCFG_##field)
+
+#define DEBUG_START             0x0
+#define DEBUG_END               (0x1000 - 1)
 
 #endif

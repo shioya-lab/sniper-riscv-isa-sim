@@ -14,6 +14,7 @@
 entry:
        jal zero, _entry
 resume:
+       // Not used.
        jal zero, _resume
 exception:
        jal zero, _exception
@@ -22,7 +23,7 @@ _entry:
         // This fence is required because the execution may have written something
         // into the Abstract Data or Program Buffer registers.
         fence
-        csrw CSR_DSCRATCH, s0  // Save s0 to allow signaling MHARTID
+        csrw CSR_DSCRATCH0, s0  // Save s0 to allow signaling MHARTID
 
         // We continue to let the hart know that we are halted in order that
         // a DM which was reset is still made aware that a hart is halted.
@@ -37,16 +38,22 @@ entry_loop:
         csrr s0, CSR_MHARTID
         lbu  s0, DEBUG_ROM_FLAGS(s0) // multiple harts can resume  here
         andi s0, s0, (1 << DEBUG_ROM_FLAG_RESUME)
-        bnez s0, resume
+        bnez s0, _resume
+        wfi
         jal  zero, entry_loop
 
 _exception:
+        // Restore S0, which we always save to dscratch.
+        // We need this in case the user tried an abstract write to a
+        // non-existent CSR.
+        csrr    s0, CSR_DSCRATCH0
         sw      zero, DEBUG_ROM_EXCEPTION(zero) // Let debug module know you got an exception.
         ebreak
 
 going:
-        csrr s0, CSR_DSCRATCH            // Restore s0 here
-        sw zero, DEBUG_ROM_GOING(zero)   // When debug module sees this write, the GO flag is reset.
+        csrr s0, CSR_MHARTID
+        sw s0, DEBUG_ROM_GOING(zero)     // When debug module sees this write, the GO flag is reset.
+        csrr s0, CSR_DSCRATCH0            // Restore s0 here
         fence
         fence.i
         jalr zero, zero, %lo(whereto)    // Debug module will put different instructions and data in the RAM, 
@@ -56,7 +63,7 @@ going:
 _resume:
         csrr s0, CSR_MHARTID
         sw   s0, DEBUG_ROM_RESUMING(zero) // When Debug Module sees this write, the RESUME flag is reset.
-        csrr s0, CSR_DSCRATCH   // Restore s0
+        csrr s0, CSR_DSCRATCH0   // Restore s0
         dret
 
         // END OF ACTUAL "ROM" CONTENTS. BELOW IS JUST FOR LINKER SCRIPT.

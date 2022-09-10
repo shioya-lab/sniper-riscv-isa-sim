@@ -1,9 +1,9 @@
-require_privilege(PRV_M);
-set_pc_and_serialize(STATE.dpc);
-p->set_privilege(STATE.dcsr.prv);
+require(STATE.debug_mode);
+set_pc_and_serialize(STATE.dpc->read());
+p->set_privilege(STATE.dcsr->prv);
 
 /* We're not in Debug Mode anymore. */
-STATE.dcsr.cause = 0;
+STATE.debug_mode = false;
 
-if (STATE.dcsr.step)
+if (STATE.dcsr->step)
   STATE.single_step = STATE.STEP_STEPPING;

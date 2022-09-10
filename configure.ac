@@ -43,6 +43,15 @@ AC_CONFIG_AUX_DIR([scripts])
 AC_CANONICAL_BUILD
 AC_CANONICAL_HOST
 
+m4_include(ax_require_defined.m4)
+m4_include(ax_append_flag.m4)
+m4_include(ax_check_compile_flag.m4)
+m4_include(ax_check_link_flag.m4)
+m4_include(ax_append_link_flags.m4)
+m4_include(ax_boost_base.m4)
+m4_include(ax_boost_asio.m4)
+m4_include(ax_boost_regex.m4)
+
 #-------------------------------------------------------------------------
 # Checks for programs
 #-------------------------------------------------------------------------
@@ -53,9 +62,9 @@ AC_CHECK_TOOL([AR],[ar])
 AC_CHECK_TOOL([RANLIB],[ranlib])
 AC_PATH_PROG([DTC],[dtc],[no])
 AS_IF([test x"$DTC" == xno],AC_MSG_ERROR([device-tree-compiler not found]))
-AC_DEFINE_UNQUOTED(DTC, ["$DTC"], [Path to the device-tree-compiler])
+AC_DEFINE_UNQUOTED(DTC, ["dtc"], [Executable name of device-tree-compiler])
 
-AC_C_BIGENDIAN(AC_MSG_ERROR([Spike requires a little-endian host]))
+AC_C_BIGENDIAN
 
 #-------------------------------------------------------------------------
 # MCPPBS specific program checks
@@ -73,11 +82,18 @@ MCPPBS_PROG_INSTALL
 AC_HEADER_STDC
 
 #-------------------------------------------------------------------------
+# Checks for type
+#-------------------------------------------------------------------------
+
+AC_CHECK_TYPE([__int128_t], AC_SUBST([HAVE_INT128],[yes]))
+
+#-------------------------------------------------------------------------
 # Default compiler flags
 #-------------------------------------------------------------------------
 
-AC_SUBST([CFLAGS],  ["-Wall -Wno-unused -g -O2"])
-AC_SUBST([CXXFLAGS],["-Wall -Wno-unused -g -O2 -std=c++11"])
+AX_APPEND_LINK_FLAGS([-Wl,--export-dynamic])
+
+AX_CHECK_COMPILE_FLAG([-relocatable-pch], AC_SUBST([HAVE_CLANG_PCH],[yes]))
 
 #-------------------------------------------------------------------------
 # MCPPBS subproject list
@@ -86,7 +102,7 @@ AC_SUBST([CXXFLAGS],["-Wall -Wno-unused -g -O2 -std=c++11"])
 # The '*' suffix indicates an optional subproject. The '**' suffix
 # indicates an optional subproject which is also the name of a group.
 
-MCPPBS_SUBPROJECTS([ riscv, dummy_rocc, softfloat, spike_main ])
+MCPPBS_SUBPROJECTS([ fesvr, riscv, disasm, customext, fdt, softfloat, spike_main, spike_dasm ])
 
 #-------------------------------------------------------------------------
 # MCPPBS subproject groups
@@ -105,9 +121,6 @@ MCPPBS_SUBPROJECTS([ riscv, dummy_rocc, softfloat, spike_main ])
 
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([Makefile])
-AC_CONFIG_FILES([riscv-spike.pc])
-AC_CONFIG_FILES([riscv-riscv.pc])
-AC_CONFIG_FILES([riscv-softfloat.pc])
-AC_CONFIG_FILES([riscv-dummy_rocc.pc])
-AC_CONFIG_FILES([riscv-spike_main.pc])
+AC_CONFIG_FILES([riscv-fesvr.pc])
+AC_CONFIG_FILES([riscv-disasm.pc])
 AC_OUTPUT

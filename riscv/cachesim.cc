@@ -7,7 +7,7 @@
 #include <iomanip>
 
 cache_sim_t::cache_sim_t(size_t _sets, size_t _ways, size_t _linesz, const char* _name)
- : sets(_sets), ways(_ways), linesz(_linesz), name(_name)
+: sets(_sets), ways(_ways), linesz(_linesz), name(_name), log(false)
 {
   init();
 }
@@ -39,9 +39,9 @@ cache_sim_t* cache_sim_t::construct(const char* config, const char* name)
 
 void cache_sim_t::init()
 {
-  if(sets == 0 || (sets & (sets-1)))
+  if (sets == 0 || (sets & (sets-1)))
     help();
-  if(linesz < 8 || (linesz & (linesz-1)))
+  if (linesz < 8 || (linesz & (linesz-1)))
     help();
 
   idx_shift = 0;
@@ -62,7 +62,7 @@ void cache_sim_t::init()
 
 cache_sim_t::cache_sim_t(const cache_sim_t& rhs)
  : sets(rhs.sets), ways(rhs.ways), linesz(rhs.linesz),
-   idx_shift(rhs.idx_shift), name(rhs.name)
+   idx_shift(rhs.idx_shift), name(rhs.name), log(false)
 {
   tags = new uint64_t[sets*ways];
   memcpy(tags, rhs.tags, sets*ways*sizeof(uint64_t));
@@ -76,7 +76,7 @@ cache_sim_t::~cache_sim_t()
 
 void cache_sim_t::print_stats()
 {
-  if(read_accesses + write_accesses == 0)
+  if (read_accesses + write_accesses == 0)
     return;
 
   float mr = 100.0f*(read_misses+write_misses)/(read_accesses+write_accesses);
@@ -135,6 +135,12 @@ void cache_sim_t::access(uint64_t addr, size_t bytes, bool store)
   }
 
   store ? write_misses++ : read_misses++;
+  if (log)
+  {
+    std::cerr << name << " "
+              << (store ? "write" : "read") << " miss 0x"
+              << std::hex << addr << std::endl;
+  }
 
   uint64_t victim = victimize(addr);
 
@@ -151,6 +157,31 @@ void cache_sim_t::access(uint64_t addr, size_t bytes, bool store)
 
   if (store)
     *check_tag(addr) |= DIRTY;
+}
+
+void cache_sim_t::clean_invalidate(uint64_t addr, size_t bytes, bool clean, bool inval)
+{
+  uint64_t start_addr = addr & ~(linesz-1);
+  uint64_t end_addr = (addr + bytes + linesz-1) & ~(linesz-1);
+  uint64_t cur_addr = start_addr;
+  while (cur_addr < end_addr) {
+    uint64_t* hit_way = check_tag(cur_addr);
+    if (likely(hit_way != NULL))
+    {
+      if (clean) {
+        if (*hit_way & DIRTY) {
+          writebacks++;
+          *hit_way &= ~DIRTY;
+        }
+      }
+
+      if (inval)
+        *hit_way &= ~VALID;
+    }
+    cur_addr += linesz;
+  }
+  if (miss_handler)
+    miss_handler->clean_invalidate(addr, bytes, clean, inval);
 }
 
 fa_cache_sim_t::fa_cache_sim_t(size_t ways, size_t linesz, const char* name)

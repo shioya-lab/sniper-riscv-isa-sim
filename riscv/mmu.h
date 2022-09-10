@@ -7,9 +7,11 @@
 #include "trap.h"
 #include "common.h"
 #include "config.h"
-#include "sim.h"
+#include "simif.h"
 #include "processor.h"
 #include "memtracer.h"
+#include "byteorder.h"
+#include "triggers.h"
 #include <stdlib.h>
 #include <vector>
 
@@ -17,6 +19,7 @@
 #define PGSHIFT 12
 const reg_t PGSIZE = 1 << PGSHIFT;
 const reg_t PGMASK = ~(PGSIZE-1);
+#define MAX_PADDR_BITS 56 // imposed by Sv39 / Sv48
 
 struct insn_fetch_t
 {
@@ -35,141 +38,194 @@ struct tlb_entry_t {
   reg_t target_offset;
 };
 
-class trigger_matched_t
-{
-  public:
-    trigger_matched_t(int index,
-        trigger_operation_t operation, reg_t address, reg_t data) :
-      index(index), operation(operation), address(address), data(data) {}
-
-    int index;
-    trigger_operation_t operation;
-    reg_t address;
-    reg_t data;
-};
-
 // this class implements a processor's port into the virtual memory system.
 // an MMU and instruction cache are maintained for simulator performance.
 class mmu_t
 {
+private:
+  std::map<reg_t, reg_t> alloc_cache;
+  std::vector<std::pair<reg_t, reg_t >> addr_tbl;
 public:
   mmu_t(simif_t* sim, processor_t* proc);
   ~mmu_t();
 
-  inline reg_t misaligned_load(reg_t addr, size_t size)
+#define RISCV_XLATE_VIRT (1U << 0)
+#define RISCV_XLATE_VIRT_HLVX (1U << 1)
+
+  inline reg_t misaligned_load(reg_t addr, size_t size, uint32_t xlate_flags)
   {
 #ifdef RISCV_ENABLE_MISALIGNED
     reg_t res = 0;
-    for (size_t i = 0; i < size; i++)
-      res += (reg_t)load_uint8(addr + i) << (i * 8);
+    for (size_t i = 0; i < size; i++) {
+      const reg_t byteaddr = addr + (target_big_endian? size-1-i : i);
+      const reg_t bytedata
+        = (RISCV_XLATE_VIRT_HLVX & xlate_flags) ? guest_load_x_uint8(byteaddr)
+        : (RISCV_XLATE_VIRT & xlate_flags)      ? guest_load_uint8(byteaddr)
+        :                                         load_uint8(byteaddr)
+        ;
+      res += bytedata << (i * 8);
+    }
     return res;
 #else
-    throw trap_load_address_misaligned(addr);
+    bool gva = ((proc) ? proc->state.v : false) || (RISCV_XLATE_VIRT & xlate_flags);
+    throw trap_load_address_misaligned(gva, addr, 0, 0);
 #endif
   }
 
-  inline void misaligned_store(reg_t addr, reg_t data, size_t size)
+  inline void misaligned_store(reg_t addr, reg_t data, size_t size, uint32_t xlate_flags, bool actually_store=true)
   {
 #ifdef RISCV_ENABLE_MISALIGNED
-    for (size_t i = 0; i < size; i++)
-      store_uint8(addr + i, data >> (i * 8));
+    for (size_t i = 0; i < size; i++) {
+      const reg_t byteaddr = addr + (target_big_endian? size-1-i : i);
+      const reg_t bytedata = data >> (i * 8);
+      if (RISCV_XLATE_VIRT & xlate_flags) {
+        guest_store_uint8(byteaddr, bytedata, actually_store);
+      } else {
+        store_uint8(byteaddr, bytedata, actually_store);
+      }
+    }
 #else
-    throw trap_store_address_misaligned(addr);
+    bool gva = ((proc) ? proc->state.v : false) || (RISCV_XLATE_VIRT & xlate_flags);
+    throw trap_store_address_misaligned(gva, addr, 0, 0);
 #endif
   }
 
-  #ifdef RISCV_ENABLE_SIFT
-  # define LOG_ADDR(addr) ({ \
-      if (proc && proc->get_state()) { \
-        proc->get_state()->log_addr = addr; \
-        proc->get_state()->log_addr_valid = true; \
-      } \
-    })
-  #else
-  # define LOG_ADDR(addr) do {} while (false)
-  #endif
+#ifdef RISCV_ENABLE_SIFT
+# define READ_MEM(addr, size) \
+  proc->state.log_mem_read.push_back(std::make_tuple(addr, 0, size));
+#else
+# define READ_MEM(addr, size) ({})
+#endif
 
   // template for functions that load an aligned value from memory
-  #define load_func(type) \
-    inline type##_t load_##type(reg_t addr) { \
-      LOG_ADDR(addr); \
-      if (unlikely(addr & (sizeof(type##_t)-1))) \
-        return misaligned_load(addr, sizeof(type##_t)); \
+  #define load_func(type, prefix, xlate_flags) \
+    type##_t ALWAYS_INLINE prefix##_##type(reg_t addr, bool require_alignment = false) { \
+      if (unlikely(addr & (sizeof(type##_t)-1))) { \
+        if (require_alignment) load_reserved_address_misaligned(addr); \
+        else return misaligned_load(addr, sizeof(type##_t), xlate_flags); \
+      } \
       reg_t vpn = addr >> PGSHIFT; \
-      if (likely(tlb_load_tag[vpn % TLB_ENTRIES] == vpn)) \
-        return *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr); \
-      if (unlikely(tlb_load_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
-        type##_t data = *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr); \
+      size_t size = sizeof(type##_t); \
+      if ((xlate_flags) == 0 && likely(tlb_load_tag[vpn % TLB_ENTRIES] == vpn)) { \
+        if (proc) READ_MEM(addr, size); \
+        return from_target(*(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr)); \
+      } \
+      if ((xlate_flags) == 0 && unlikely(tlb_load_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
+        type##_t data = from_target(*(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr)); \
         if (!matched_trigger) { \
-          matched_trigger = trigger_exception(OPERATION_LOAD, addr, data); \
+          matched_trigger = trigger_exception(triggers::OPERATION_LOAD, addr, data); \
           if (matched_trigger) \
             throw *matched_trigger; \
         } \
+        if (proc) READ_MEM(addr, size); \
         return data; \
       } \
-      type##_t res; \
-      load_slow_path(addr, sizeof(type##_t), (uint8_t*)&res); \
-      return res; \
+      target_endian<type##_t> res; \
+      load_slow_path(addr, sizeof(type##_t), (uint8_t*)&res, (xlate_flags)); \
+      if (proc) READ_MEM(addr, size); \
+      return from_target(res); \
     }
 
   // load value from memory at aligned address; zero extend to register width
-  load_func(uint8)
-  load_func(uint16)
-  load_func(uint32)
-  load_func(uint64)
+  load_func(uint8, load, 0)
+  load_func(uint16, load, 0)
+  load_func(uint32, load, 0)
+  load_func(uint64, load, 0)
+
+  // load value from guest memory at aligned address; zero extend to register width
+  load_func(uint8, guest_load, RISCV_XLATE_VIRT)
+  load_func(uint16, guest_load, RISCV_XLATE_VIRT)
+  load_func(uint32, guest_load, RISCV_XLATE_VIRT)
+  load_func(uint64, guest_load, RISCV_XLATE_VIRT)
+  load_func(uint8, guest_load_x, RISCV_XLATE_VIRT|RISCV_XLATE_VIRT_HLVX)  // only for use by misaligned HLVX
+  load_func(uint16, guest_load_x, RISCV_XLATE_VIRT|RISCV_XLATE_VIRT_HLVX)
+  load_func(uint32, guest_load_x, RISCV_XLATE_VIRT|RISCV_XLATE_VIRT_HLVX)
 
   // load value from memory at aligned address; sign extend to register width
-  load_func(int8)
-  load_func(int16)
-  load_func(int32)
-  load_func(int64)
+  load_func(int8, load, 0)
+  load_func(int16, load, 0)
+  load_func(int32, load, 0)
+  load_func(int64, load, 0)
+
+  // load value from guest memory at aligned address; sign extend to register width
+  load_func(int8, guest_load, RISCV_XLATE_VIRT)
+  load_func(int16, guest_load, RISCV_XLATE_VIRT)
+  load_func(int32, guest_load, RISCV_XLATE_VIRT)
+  load_func(int64, guest_load, RISCV_XLATE_VIRT)
+
+#ifndef RISCV_ENABLE_COMMITLOG
+# define WRITE_MEM(addr, value, size) ({})
+#else
+# define WRITE_MEM(addr, val, size) \
+  proc->state.log_mem_write.push_back(std::make_tuple(addr, val, size));
+#endif
 
   // template for functions that store an aligned value to memory
-  #define store_func(type) \
-    void store_##type(reg_t addr, type##_t val) { \
+  #define store_func(type, prefix, xlate_flags) \
+    void ALWAYS_INLINE prefix##_##type(reg_t addr, type##_t val, bool actually_store=true, bool require_alignment=false) { \
       LOG_ADDR(addr); \
-      if (unlikely(addr & (sizeof(type##_t)-1))) \
-        return misaligned_store(addr, val, sizeof(type##_t)); \
-      reg_t vpn = addr >> PGSHIFT; \
-      if (likely(tlb_store_tag[vpn % TLB_ENTRIES] == vpn)) \
-        *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = val; \
-      else if (unlikely(tlb_store_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
-        if (!matched_trigger) { \
-          matched_trigger = trigger_exception(OPERATION_STORE, addr, val); \
-          if (matched_trigger) \
-            throw *matched_trigger; \
-        } \
-        *(type##_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = val; \
+      if (unlikely(addr & (sizeof(type##_t)-1))) { \
+        if (require_alignment) store_conditional_address_misaligned(addr); \
+        else return misaligned_store(addr, val, sizeof(type##_t), xlate_flags, actually_store); \
       } \
-      else \
-        store_slow_path(addr, sizeof(type##_t), (const uint8_t*)&val); \
+      reg_t vpn = addr >> PGSHIFT; \
+      size_t size = sizeof(type##_t); \
+      if ((xlate_flags) == 0 && likely(tlb_store_tag[vpn % TLB_ENTRIES] == vpn)) { \
+        if (actually_store) { \
+          if (proc) WRITE_MEM(addr, val, size); \
+          *(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = to_target(val); \
+        } \
+      } \
+      else if ((xlate_flags) == 0 && unlikely(tlb_store_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
+        if (actually_store) { \
+          if (!matched_trigger) { \
+            matched_trigger = trigger_exception(triggers::OPERATION_STORE, addr, val); \
+            if (matched_trigger) \
+              throw *matched_trigger; \
+          } \
+          if (proc) WRITE_MEM(addr, val, size); \
+          *(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = to_target(val); \
+        } \
+      } \
+      else { \
+        target_endian<type##_t> target_val = to_target(val); \
+        store_slow_path(addr, sizeof(type##_t), (const uint8_t*)&target_val, (xlate_flags), actually_store); \
+        if (actually_store && proc) WRITE_MEM(addr, val, size); \
+      } \
+  }
+
+  // AMO/Zicbom faults should be reported as store faults
+  #define convert_load_traps_to_store_traps(BODY) \
+    try { \
+      BODY \
+    } catch (trap_load_address_misaligned& t) { \
+      /* Misaligned fault will not be triggered by Zicbom */ \
+      throw trap_store_address_misaligned(t.has_gva(), t.get_tval(), t.get_tval2(), t.get_tinst()); \
+    } catch (trap_load_page_fault& t) { \
+      throw trap_store_page_fault(t.has_gva(), t.get_tval(), t.get_tval2(), t.get_tinst()); \
+    } catch (trap_load_access_fault& t) { \
+      throw trap_store_access_fault(t.has_gva(), t.get_tval(), t.get_tval2(), t.get_tinst()); \
+    } catch (trap_load_guest_page_fault& t) { \
+      throw trap_store_guest_page_fault(t.get_tval(), t.get_tval2(), t.get_tinst()); \
     }
 
   // template for functions that perform an atomic memory operation
   #define amo_func(type) \
     template<typename op> \
     type##_t amo_##type(reg_t addr, op f) { \
-      LOG_ADDR(addr); \
-      if (addr & (sizeof(type##_t)-1)) \
-        throw trap_store_address_misaligned(addr); \
-      try { \
-        auto lhs = load_##type(addr); \
+      convert_load_traps_to_store_traps({ \
+        store_##type(addr, 0, false, true); \
+        auto lhs = load_##type(addr, true); \
         store_##type(addr, f(lhs)); \
         return lhs; \
-      } catch (trap_load_page_fault& t) { \
-        /* AMO faults should be reported as store faults */ \
-        throw trap_store_page_fault(t.get_tval()); \
-      } catch (trap_load_access_fault& t) { \
-        /* AMO faults should be reported as store faults */ \
-        throw trap_store_access_fault(t.get_tval()); \
-      } \
+      }) \
     }
 
   void store_float128(reg_t addr, float128_t val)
   {
 #ifndef RISCV_ENABLE_MISALIGNED
     if (unlikely(addr & (sizeof(float128_t)-1)))
-      throw trap_store_address_misaligned(addr);
+      throw trap_store_address_misaligned((proc) ? proc->state.v : false, addr, 0, 0);
 #endif
     store_uint64(addr, val.v[0]);
     store_uint64(addr + 8, val.v[1]);
@@ -179,20 +235,91 @@ public:
   {
 #ifndef RISCV_ENABLE_MISALIGNED
     if (unlikely(addr & (sizeof(float128_t)-1)))
-      throw trap_load_address_misaligned(addr);
+      throw trap_load_address_misaligned((proc) ? proc->state.v : false, addr, 0, 0);
 #endif
     return (float128_t){load_uint64(addr), load_uint64(addr + 8)};
   }
 
   // store value to memory at aligned address
-  store_func(uint8)
-  store_func(uint16)
-  store_func(uint32)
-  store_func(uint64)
+  store_func(uint8, store, 0)
+  store_func(uint16, store, 0)
+  store_func(uint32, store, 0)
+  store_func(uint64, store, 0)
+
+  // store value to guest memory at aligned address
+  store_func(uint8, guest_store, RISCV_XLATE_VIRT)
+  store_func(uint16, guest_store, RISCV_XLATE_VIRT)
+  store_func(uint32, guest_store, RISCV_XLATE_VIRT)
+  store_func(uint64, guest_store, RISCV_XLATE_VIRT)
 
   // perform an atomic memory operation at an aligned address
   amo_func(uint32)
   amo_func(uint64)
+
+  void cbo_zero(reg_t addr) {
+    auto base = addr & ~(blocksz - 1);
+    for (size_t offset = 0; offset < blocksz; offset += 1)
+      store_uint8(base + offset, 0);
+  }
+
+  void clean_inval(reg_t addr, bool clean, bool inval) {
+    convert_load_traps_to_store_traps({
+      const reg_t vaddr = addr & ~(blocksz - 1);
+      const reg_t paddr = translate(vaddr, blocksz, LOAD, 0);
+      if (auto host_addr = sim->addr_to_mem(paddr)) {
+        if (tracer.interested_in_range(paddr, paddr + PGSIZE, LOAD))
+          tracer.clean_invalidate(paddr, blocksz, clean, inval);
+      } else {
+        throw trap_store_access_fault((proc) ? proc->state.v : false, addr, 0, 0);
+      }
+    })
+  }
+
+  inline void yield_load_reservation()
+  {
+    load_reservation_address = (reg_t)-1;
+  }
+
+  inline void acquire_load_reservation(reg_t vaddr)
+  {
+    reg_t paddr = translate(vaddr, 1, LOAD, 0);
+    if (auto host_addr = sim->addr_to_mem(paddr))
+      load_reservation_address = refill_tlb(vaddr, paddr, host_addr, LOAD).target_offset + vaddr;
+    else
+      throw trap_load_access_fault((proc) ? proc->state.v : false, vaddr, 0, 0); // disallow LR to I/O space
+  }
+
+  inline void load_reserved_address_misaligned(reg_t vaddr)
+  {
+    bool gva = proc ? proc->state.v : false;
+#ifdef RISCV_ENABLE_MISALIGNED
+    throw trap_load_access_fault(gva, vaddr, 0, 0);
+#else
+    throw trap_load_address_misaligned(gva, vaddr, 0, 0);
+#endif
+  }
+
+  inline void store_conditional_address_misaligned(reg_t vaddr)
+  {
+    bool gva = proc ? proc->state.v : false;
+#ifdef RISCV_ENABLE_MISALIGNED
+    throw trap_store_access_fault(gva, vaddr, 0, 0);
+#else
+    throw trap_store_address_misaligned(gva, vaddr, 0, 0);
+#endif
+  }
+
+  inline bool check_load_reservation(reg_t vaddr, size_t size)
+  {
+    if (vaddr & (size-1))
+      store_conditional_address_misaligned(vaddr);
+
+    reg_t paddr = translate(vaddr, 1, STORE, 0);
+    if (auto host_addr = sim->addr_to_mem(paddr))
+      return load_reservation_address == refill_tlb(vaddr, paddr, host_addr, STORE).target_offset + vaddr;
+    else
+      throw trap_store_access_fault((proc) ? proc->state.v : false, vaddr, 0, 0); // disallow SC to I/O space
+  }
 
   static const reg_t ICACHE_ENTRIES = 1024;
 
@@ -204,21 +331,21 @@ public:
   inline icache_entry_t* refill_icache(reg_t addr, icache_entry_t* entry)
   {
     auto tlb_entry = translate_insn_addr(addr);
-    insn_bits_t insn = *(uint16_t*)(tlb_entry.host_offset + addr);
+    insn_bits_t insn = from_le(*(uint16_t*)(tlb_entry.host_offset + addr));
     int length = insn_length(insn);
 
     if (likely(length == 4)) {
-      insn |= (insn_bits_t)*(const int16_t*)translate_insn_addr_to_host(addr + 2) << 16;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 2)) << 16;
     } else if (length == 2) {
-      insn = (int16_t)insn;
+      // entire instruction already fetched
     } else if (length == 6) {
-      insn |= (insn_bits_t)*(const int16_t*)translate_insn_addr_to_host(addr + 4) << 32;
-      insn |= (insn_bits_t)*(const uint16_t*)translate_insn_addr_to_host(addr + 2) << 16;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 4)) << 32;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 2)) << 16;
     } else {
       static_assert(sizeof(insn_bits_t) == 8, "insn_bits_t must be uint64_t");
-      insn |= (insn_bits_t)*(const int16_t*)translate_insn_addr_to_host(addr + 6) << 48;
-      insn |= (insn_bits_t)*(const uint16_t*)translate_insn_addr_to_host(addr + 4) << 32;
-      insn |= (insn_bits_t)*(const uint16_t*)translate_insn_addr_to_host(addr + 2) << 16;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 6)) << 48;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 4)) << 32;
+      insn |= (insn_bits_t)from_le(*(const uint16_t*)translate_insn_addr_to_host(addr + 2)) << 16;
     }
 
     insn_fetch_t fetch = {proc->decode_insn(insn), insn};
@@ -271,11 +398,42 @@ public:
 #endif
   }
 
+  void set_target_big_endian(bool enable)
+  {
+#ifdef RISCV_ENABLE_DUAL_ENDIAN
+    target_big_endian = enable;
+#else
+    assert(enable == false);
+#endif
+  }
+
+  bool is_target_big_endian()
+  {
+    return target_big_endian;
+  }
+
+  template<typename T> inline T from_target(target_endian<T> n) const
+  {
+    return target_big_endian? n.from_be() : n.from_le();
+  }
+
+  template<typename T> inline target_endian<T> to_target(T n) const
+  {
+    return target_big_endian? target_endian<T>::to_be(n) : target_endian<T>::to_le(n);
+  }
+
+  void set_cache_blocksz(uint64_t size)
+  {
+    blocksz = size;
+  }
+
 private:
   simif_t* sim;
   processor_t* proc;
   memtracer_list_t tracer;
+  reg_t load_reservation_address;
   uint16_t fetch_temp;
+  uint64_t blocksz;
 
   // implement an instruction cache for simulator performance
   icache_entry_t icache[ICACHE_ENTRIES];
@@ -294,54 +452,76 @@ private:
   tlb_entry_t refill_tlb(reg_t vaddr, reg_t paddr, char* host_addr, access_type type);
   const char* fill_from_mmio(reg_t vaddr, reg_t paddr);
 
+  // perform a stage2 translation for a given guest address
+  reg_t s2xlate(reg_t gva, reg_t gpa, access_type type, access_type trap_type, bool virt, bool hlvx);
+
   // perform a page table walk for a given VA; set referenced/dirty bits
-  reg_t walk(reg_t addr, access_type type, reg_t prv);
+  reg_t walk(reg_t addr, access_type type, reg_t prv, bool virt, bool hlvx);
 
   // handle uncommon cases: TLB misses, page faults, MMIO
   tlb_entry_t fetch_slow_path(reg_t addr);
-  void load_slow_path(reg_t addr, reg_t len, uint8_t* bytes);
-  void store_slow_path(reg_t addr, reg_t len, const uint8_t* bytes);
-  reg_t translate(reg_t addr, access_type type);
+  void load_slow_path(reg_t addr, reg_t len, uint8_t* bytes, uint32_t xlate_flags);
+  void store_slow_path(reg_t addr, reg_t len, const uint8_t* bytes, uint32_t xlate_flags, bool actually_store);
+  bool mmio_load(reg_t addr, size_t len, uint8_t* bytes);
+  bool mmio_store(reg_t addr, size_t len, const uint8_t* bytes);
+  bool mmio_ok(reg_t addr, access_type type);
+  reg_t translate(reg_t addr, reg_t len, access_type type, uint32_t xlate_flags);
 
   // ITLB lookup
   inline tlb_entry_t translate_insn_addr(reg_t addr) {
     reg_t vpn = addr >> PGSHIFT;
     if (likely(tlb_insn_tag[vpn % TLB_ENTRIES] == vpn))
       return tlb_data[vpn % TLB_ENTRIES];
-    if (unlikely(tlb_insn_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) {
-      uint16_t* ptr = (uint16_t*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr);
-      int match = proc->trigger_match(OPERATION_EXECUTE, addr, *ptr);
-      if (match >= 0)
-        throw trigger_matched_t(match, OPERATION_EXECUTE, addr, *ptr);
-      return tlb_data[vpn % TLB_ENTRIES];
+    tlb_entry_t result;
+    if (unlikely(tlb_insn_tag[vpn % TLB_ENTRIES] != (vpn | TLB_CHECK_TRIGGERS))) {
+      result = fetch_slow_path(addr);
+    } else {
+      result = tlb_data[vpn % TLB_ENTRIES];
     }
-    return fetch_slow_path(addr);
+    if (unlikely(tlb_insn_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) {
+      target_endian<uint16_t>* ptr = (target_endian<uint16_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr);
+      triggers::action_t action;
+      auto match = proc->TM.memory_access_match(&action, triggers::OPERATION_EXECUTE, addr, from_target(*ptr));
+      if (match != triggers::MATCH_NONE) {
+        throw triggers::matched_t(triggers::OPERATION_EXECUTE, addr, from_target(*ptr), action);
+      }
+    }
+    return result;
   }
 
   inline const uint16_t* translate_insn_addr_to_host(reg_t addr) {
     return (uint16_t*)(translate_insn_addr(addr).host_offset + addr);
   }
 
-  inline trigger_matched_t *trigger_exception(trigger_operation_t operation,
+  inline triggers::matched_t *trigger_exception(triggers::operation_t operation,
       reg_t address, reg_t data)
   {
     if (!proc) {
       return NULL;
     }
-    int match = proc->trigger_match(operation, address, data);
-    if (match == -1)
+    triggers::action_t action;
+    auto match = proc->TM.memory_access_match(&action, operation, address, data);
+    if (match == triggers::MATCH_NONE)
       return NULL;
-    if (proc->state.mcontrol[match].timing == 0) {
-      throw trigger_matched_t(match, operation, address, data);
+    if (match == triggers::MATCH_FIRE_BEFORE) {
+      throw triggers::matched_t(operation, address, data, action);
     }
-    return new trigger_matched_t(match, operation, address, data);
+    return new triggers::matched_t(operation, address, data, action);
   }
 
+  reg_t pmp_homogeneous(reg_t addr, reg_t len);
+  bool pmp_ok(reg_t addr, reg_t len, access_type type, reg_t mode);
+
+#ifdef RISCV_ENABLE_DUAL_ENDIAN
+  bool target_big_endian;
+#else
+  static const bool target_big_endian = false;
+#endif
   bool check_triggers_fetch;
   bool check_triggers_load;
   bool check_triggers_store;
   // The exception describing a matched trigger, or NULL.
-  trigger_matched_t *matched_trigger;
+  triggers::matched_t *matched_trigger;
 
   friend class processor_t;
 };
@@ -349,27 +529,42 @@ private:
 struct vm_info {
   int levels;
   int idxbits;
+  int widenbits;
   int ptesize;
   reg_t ptbase;
 };
 
-inline vm_info decode_vm_info(int xlen, reg_t prv, reg_t satp)
+inline vm_info decode_vm_info(int xlen, bool stage2, reg_t prv, reg_t satp)
 {
   if (prv == PRV_M) {
-    return {0, 0, 0, 0};
-  } else if (prv <= PRV_S && xlen == 32) {
+    return {0, 0, 0, 0, 0};
+  } else if (!stage2 && prv <= PRV_S && xlen == 32) {
     switch (get_field(satp, SATP32_MODE)) {
-      case SATP_MODE_OFF: return {0, 0, 0, 0};
-      case SATP_MODE_SV32: return {2, 10, 4, (satp & SATP32_PPN) << PGSHIFT};
+      case SATP_MODE_OFF: return {0, 0, 0, 0, 0};
+      case SATP_MODE_SV32: return {2, 10, 0, 4, (satp & SATP32_PPN) << PGSHIFT};
       default: abort();
     }
-  } else if (prv <= PRV_S && xlen == 64) {
+  } else if (!stage2 && prv <= PRV_S && xlen == 64) {
     switch (get_field(satp, SATP64_MODE)) {
-      case SATP_MODE_OFF: return {0, 0, 0, 0};
-      case SATP_MODE_SV39: return {3, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
-      case SATP_MODE_SV48: return {4, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
-      case SATP_MODE_SV57: return {5, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
-      case SATP_MODE_SV64: return {6, 9, 8, (satp & SATP64_PPN) << PGSHIFT};
+      case SATP_MODE_OFF: return {0, 0, 0, 0, 0};
+      case SATP_MODE_SV39: return {3, 9, 0, 8, (satp & SATP64_PPN) << PGSHIFT};
+      case SATP_MODE_SV48: return {4, 9, 0, 8, (satp & SATP64_PPN) << PGSHIFT};
+      case SATP_MODE_SV57: return {5, 9, 0, 8, (satp & SATP64_PPN) << PGSHIFT};
+      case SATP_MODE_SV64: return {6, 9, 0, 8, (satp & SATP64_PPN) << PGSHIFT};
+      default: abort();
+    }
+  } else if (stage2 && xlen == 32) {
+    switch (get_field(satp, HGATP32_MODE)) {
+      case HGATP_MODE_OFF: return {0, 0, 0, 0, 0};
+      case HGATP_MODE_SV32X4: return {2, 10, 2, 4, (satp & HGATP32_PPN) << PGSHIFT};
+      default: abort();
+    }
+  } else if (stage2 && xlen == 64) {
+    switch (get_field(satp, HGATP64_MODE)) {
+      case HGATP_MODE_OFF: return {0, 0, 0, 0, 0};
+      case HGATP_MODE_SV39X4: return {3, 9, 2, 8, (satp & HGATP64_PPN) << PGSHIFT};
+      case HGATP_MODE_SV48X4: return {4, 9, 2, 8, (satp & HGATP64_PPN) << PGSHIFT};
+      case HGATP_MODE_SV57X4: return {5, 9, 2, 8, (satp & HGATP64_PPN) << PGSHIFT};
       default: abort();
     }
   } else {
