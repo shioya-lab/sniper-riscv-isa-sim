@@ -33,11 +33,6 @@ class sim_t : public htif_t, public simif_t
 {
 public:
   sim_t(const cfg_t *cfg, bool halted,
-        std::vector<std::pair<reg_t, mem_t*>> mems,
-        const std::vector<std::string>& args, const std::vector<int> hartids,
-        unsigned progsize, unsigned max_bus_master_bits, bool require_authentication,
-        const char* sift_filename);
-
         std::vector<std::pair<reg_t, abstract_device_t*>> plugin_devices,
         const std::vector<std::string>& args,
         const debug_module_config_t &dm_config, const char *log_path,

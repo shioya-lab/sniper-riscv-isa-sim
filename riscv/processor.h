@@ -391,6 +391,7 @@ private:
   // Track repeated executions for processor_t::disasm()
   uint64_t last_pc, last_bits, executions;
   const char* sift_filename;
+
 public:
   entropy_source es; // Crypto ISE Entropy source.
 
@@ -482,7 +483,6 @@ public:
 
   vectorUnit_t VU;
   triggers::module_t TM;
->>>>>>> a0972c82d022f6f7c337b06b27c89a60af52202a
 };
 
 #endif

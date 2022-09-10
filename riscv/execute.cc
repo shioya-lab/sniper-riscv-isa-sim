@@ -197,7 +197,6 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
   commit_log_reset(p);
   commit_log_stash_privilege(p);
   log_print_sift_trace(p->get_state(), pc, fetch.insn);
-
 #endif
   reg_t npc;
 
@@ -232,7 +231,6 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
 #endif
   } catch(...) {
     throw;
->>>>>>> a0972c82d022f6f7c337b06b27c89a60af52202a
   }
   p->update_histogram(pc);
 

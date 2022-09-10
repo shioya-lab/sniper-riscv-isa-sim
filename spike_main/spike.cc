@@ -496,8 +496,7 @@ int main(int argc, char** argv)
 #ifdef HAVE_BOOST_ASIO
       io_service_ptr, acceptor_ptr,
 #endif
-      cmd_file);
->>>>>>> a0972c82d022f6f7c337b06b27c89a60af52202a
+          cmd_file, sift_filename);
   std::unique_ptr<remote_bitbang_t> remote_bitbang((remote_bitbang_t *) NULL);
   std::unique_ptr<jtag_dtm_t> jtag_dtm(
       new jtag_dtm_t(&s.debug_module, dmi_rti));
