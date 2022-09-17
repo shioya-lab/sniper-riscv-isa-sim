@@ -100,8 +100,8 @@ public:
   #ifdef RISCV_ENABLE_SIFT
   # define LOG_ADDR(addr) ({ \
       if (proc && proc->get_state()) { \
-        proc->get_state()->log_addr = addr; \
-        proc->get_state()->log_addr_valid = true; \
+        proc->get_state()->log_addr[proc->get_state()->log_addr_valid] = addr; \
+        proc->get_state()->log_addr_valid++; \
       } \
     })
   #else

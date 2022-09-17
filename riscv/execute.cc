@@ -176,13 +176,13 @@ static void log_print_sift_trace(state_t* state, reg_t pc, insn_t insn)
 #ifdef RISCV_ENABLE_SIFT
   uint64_t addr = pc;
   uint64_t size = insn.length();
-  uint8_t  num_addresses = state->log_addr_valid; // true -> 1, false -> 0
-  uint64_t addresses[1] = {state->log_addr};
+  uint8_t  num_addresses = state->log_addr_valid;
+  uint64_t *addresses = state->log_addr;
   bool     is_branch = state->log_is_branch;
   bool     taken = state->log_is_branch_taken;
   state->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
-  state->log_addr = 0;
-  state->log_addr_valid = false;
+  // state->log_addr = 0;
+  state->log_addr_valid = 0;
   state->log_is_branch = false;
   state->log_is_branch_taken = false;
 #endif
