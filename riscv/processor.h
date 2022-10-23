@@ -249,6 +249,7 @@ public:
   processor_t(const isa_parser_t *isa, const char* varch,
               simif_t* sim, uint32_t id, bool halt_on_reset,
               FILE *log_file, std::ostream& sout_, // because of command line option --log and -s we need both
+              mmu_t *debug_mmu,
               const char* sift_filename="spike");
   ~processor_t();
 
@@ -344,6 +345,8 @@ public:
   void set_mmu_capability(int cap);
 
   const char* get_symbol(uint64_t addr);
+
+  mmu_t *debug_mmu;
 
 private:
   const isa_parser_t * const isa;

@@ -26,11 +26,13 @@
 processor_t::processor_t(const isa_parser_t *isa, const char* varch,
                          simif_t* sim, uint32_t id, bool halt_on_reset,
                          FILE* log_file, std::ostream& sout_,
-                        const char* sift_filename)
-  : debug(false), halt_request(HR_NONE), isa(isa), sim(sim), id(id), xlen(0),
-  histogram_enabled(false), log_commits_enabled(false),
-  log_file(log_file), sout_(sout_.rdbuf()), halt_on_reset(halt_on_reset),
-  impl_table(256, false), last_pc(1), executions(1), TM(4), sift_filename(sift_filename)
+                         mmu_t *debug_mmu,
+                         const char* sift_filename)
+    : debug(false), halt_request(HR_NONE), isa(isa), sim(sim), id(id), xlen(0),
+      histogram_enabled(false), log_commits_enabled(false),
+      log_file(log_file), sout_(sout_.rdbuf()), halt_on_reset(halt_on_reset),
+      impl_table(256, false), last_pc(1), executions(1), TM(4), sift_filename(sift_filename),
+      debug_mmu(debug_mmu)
 {
   VU.p = this;
   TM.proc = this;
@@ -185,12 +187,14 @@ static int xlen_to_uxl(int xlen)
   abort();
 }
 
+
+extern uint32_t sift_executed_insn; // defined in execute.cc
+
 void getCode(uint8_t *dst, const uint8_t *src, uint32_t size, void* _mmu)
 {
-  mmu_t *mmu = reinterpret_cast<mmu_t*>(_mmu);
-  for (uint32_t i = 0 ; i < size ; ++i)
-  {
-    dst[i] = mmu->load_uint8(reinterpret_cast<reg_t>(src)+i);
+  for (uint32_t i = 0 ; i < size ; ++i) {
+    dst[i] = sift_executed_insn & 0xff;
+    sift_executed_insn >>= 8;
   }
 }
 
@@ -510,7 +514,8 @@ void state_t::reset(processor_t* const proc, reg_t max_isa, mmu_t *mmu, uint32_t
   //}
   //filename += ".sift";
   std::string filename = sift_filename;
-  log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));;
+  // log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(proc->debug_mmu));;
+  log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));
 #endif // RISCV_ENABLE_SIFT
 
 #ifdef RISCV_ENABLE_COMMITLOG

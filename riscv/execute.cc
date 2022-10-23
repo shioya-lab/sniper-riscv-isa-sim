@@ -25,6 +25,14 @@ static void commit_log_stash_privilege(processor_t* p)
   state->last_inst_flen = p->get_flen();
 }
 
+uint32_t sift_executed_insn;
+
+
+void record_executed_insn (uint64_t pc)
+{
+  sift_executed_insn = pc;
+}
+
 static void commit_log_print_value(FILE *log_file, int width, const void *data)
 {
   assert(log_file);
@@ -86,6 +94,7 @@ static void commit_log_print_insn(processor_t *p, reg_t pc, insn_t insn)
   commit_log_print_value(log_file, xlen, pc);
   fprintf(log_file, " (");
   commit_log_print_value(log_file, insn.length() * 8, insn.bits());
+  record_executed_insn (insn.bits());
   fprintf(log_file, ")");
   bool show_vec = false;
 
@@ -170,6 +179,8 @@ inline void processor_t::update_histogram(reg_t pc)
   pc_histogram[pc]++;
 #endif
 }
+
+
 
 static void log_print_sift_trace(state_t* state, reg_t pc, insn_t insn)
 {
