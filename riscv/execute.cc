@@ -28,9 +28,9 @@ static void commit_log_stash_privilege(processor_t* p)
 uint32_t sift_executed_insn;
 
 
-void record_executed_insn (uint64_t pc)
+void record_executed_insn (uint64_t insn)
 {
-  sift_executed_insn = pc;
+  sift_executed_insn = insn;
 }
 
 static void commit_log_print_value(FILE *log_file, int width, const void *data)
@@ -94,7 +94,6 @@ static void commit_log_print_insn(processor_t *p, reg_t pc, insn_t insn)
   commit_log_print_value(log_file, xlen, pc);
   fprintf(log_file, " (");
   commit_log_print_value(log_file, insn.length() * 8, insn.bits());
-  record_executed_insn (insn.bits());
   fprintf(log_file, ")");
   bool show_vec = false;
 
@@ -182,20 +181,51 @@ inline void processor_t::update_histogram(reg_t pc)
 
 
 
-static void log_print_sift_trace(state_t* state, reg_t pc, insn_t insn)
+static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
 {
 #ifdef RISCV_ENABLE_SIFT
   uint64_t addr = pc;
   uint64_t size = insn.length();
-  uint8_t  num_addresses = state->log_addr_valid;
-  uint64_t *addresses = state->log_addr;
-  bool     is_branch = state->log_is_branch;
-  bool     taken = state->log_is_branch_taken;
-  state->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
-  // state->log_addr = 0;
-  state->log_addr_valid = 0;
-  state->log_is_branch = false;
-  state->log_is_branch_taken = false;
+  uint8_t  num_addresses = p->get_state()->log_addr_valid;
+  uint64_t *addresses = p->get_state()->log_addr;
+  reg_t    *wr_regs = p->get_state()->log_reg_addr;
+  bool     is_branch = p->get_state()->log_is_branch;
+  bool     taken = p->get_state()->log_is_branch_taken;
+
+  auto& reg = p->get_state()->log_reg_write;
+
+  std::vector<reg_t>vreg_array;
+  for (uint64_t addr_i = 0; addr_i < num_addresses; addr_i++) {
+    if (std::find(vreg_array.begin(), vreg_array.end(), wr_regs[addr_i]) == vreg_array.end()) {
+      vreg_array.push_back(wr_regs[addr_i]);
+      fprintf(stderr, "registered vreg : %ld\n", wr_regs[addr_i]);
+    }
+  }
+
+  if (vreg_array.size() > 0) {
+    for (reg_t vreg_idx = 0; vreg_idx < vreg_array.size(); vreg_idx++) {
+      uint64_t uop_addresses[128];
+
+      uint64_t num_mem_addr = 0;
+
+      for (uint64_t addr_i = 0; addr_i < num_addresses; addr_i++) {
+        // fprintf(stderr, "vreg_wr_array[%ld]=%ld == wr_regs[%ld]=%ld\n",
+        //         vreg_idx, vreg_wr_array[vreg_idx],
+        //         addr_i, wr_regs[addr_i]);
+        if (vreg_array[vreg_idx] == wr_regs[addr_i]) {
+          uop_addresses[num_mem_addr++] = addresses[addr_i];
+        }
+      }
+      p->get_state()->log_writer->Instruction(addr, size, num_mem_addr, uop_addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
+    }
+  } else {
+    p->get_state()->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
+  }
+
+  // p->get_state()->log_addr = 0;
+  p->get_state()->log_addr_valid = 0;
+  p->get_state()->log_is_branch = false;
+  p->get_state()->log_is_branch_taken = false;
 #endif
 }
 
@@ -216,19 +246,21 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
     if (npc != PC_SERIALIZE_BEFORE) {
 
 #ifdef RISCV_ENABLE_COMMITLOG
+      record_executed_insn (fetch.insn.bits());
       if (p->get_log_commits_enabled()) {
         commit_log_print_insn(p, pc, fetch.insn);
       }
 #endif
 
-      log_print_sift_trace(p->get_state(), pc, fetch.insn);
+      log_print_sift_trace(p, pc, fetch.insn);
 
     }
 #ifdef RISCV_ENABLE_COMMITLOG
   } catch (wait_for_interrupt_t &t) {
+      record_executed_insn (fetch.insn.bits());
       if (p->get_log_commits_enabled()) {
         commit_log_print_insn(p, pc, fetch.insn);
-        log_print_sift_trace(p->get_state(), pc, fetch.insn);
+        log_print_sift_trace(p, pc, fetch.insn);
       }
       throw;
   } catch(mem_trap_t& t) {
@@ -236,8 +268,9 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
       if (p->get_log_commits_enabled()) {
         for (auto item : p->get_state()->log_reg_write) {
           if ((item.first & 3) == 3) {
+            record_executed_insn (fetch.insn.bits());
             commit_log_print_insn(p, pc, fetch.insn);
-            log_print_sift_trace(p->get_state(), pc, fetch.insn);
+            log_print_sift_trace(p, pc, fetch.insn);
             break;
           }
         }

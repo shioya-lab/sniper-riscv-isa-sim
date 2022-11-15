@@ -98,9 +98,10 @@ public:
 #endif
 
   #ifdef RISCV_ENABLE_SIFT
-  # define LOG_ADDR(addr) ({ \
+# define LOG_ADDR(addr, reg_addr) ({            \
       if (proc && proc->get_state()) { \
         proc->get_state()->log_addr[proc->get_state()->log_addr_valid] = addr; \
+        proc->get_state()->log_reg_addr[proc->get_state()->log_addr_valid] = reg_addr; \
         proc->get_state()->log_addr_valid++; \
       } \
     })
@@ -111,7 +112,7 @@ public:
   // template for functions that load an aligned value from memory
   #define load_func(type, prefix, xlate_flags) \
     type##_t ALWAYS_INLINE prefix##_##type(reg_t addr, bool require_alignment = false) { \
-      LOG_ADDR(addr); \
+      LOG_ADDR(addr, 0);                                                  \
       if (unlikely(addr & (sizeof(type##_t)-1))) { \
         if (require_alignment) load_reserved_address_misaligned(addr); \
         else return misaligned_load(addr, sizeof(type##_t), xlate_flags); \
@@ -137,6 +138,37 @@ public:
       if (proc) READ_MEM(addr, size); \
       return from_target(res); \
     }
+
+  #define load_func_vec(type, prefix, xlate_flags) \
+    type##_t ALWAYS_INLINE prefix##_vec_##type(reg_t addr, reg_t vreg_addr, reg_t vreg_inx) { \
+      reg_t elts_per_reg = (proc->VU.VLEN >> 3) / (sizeof(type##_t));                     \
+      vreg_addr += vreg_inx / elts_per_reg;                                           \
+      LOG_ADDR(addr, vreg_addr);                                                  \
+      if (unlikely(addr & (sizeof(type##_t)-1))) { \
+        load_reserved_address_misaligned(addr); \
+      } \
+      reg_t vpn = addr >> PGSHIFT; \
+      size_t size = sizeof(type##_t); \
+      if ((xlate_flags) == 0 && likely(tlb_load_tag[vpn % TLB_ENTRIES] == vpn)) { \
+        if (proc) READ_MEM(addr, size); \
+        return from_target(*(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr)); \
+      } \
+      if ((xlate_flags) == 0 && unlikely(tlb_load_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
+        type##_t data = from_target(*(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr)); \
+        if (!matched_trigger) { \
+          matched_trigger = trigger_exception(triggers::OPERATION_LOAD, addr, data); \
+          if (matched_trigger) \
+            throw *matched_trigger; \
+        } \
+        if (proc) READ_MEM(addr, size); \
+        return data; \
+      } \
+      target_endian<type##_t> res; \
+      load_slow_path(addr, sizeof(type##_t), (uint8_t*)&res, (xlate_flags)); \
+      if (proc) READ_MEM(addr, size); \
+      return from_target(res); \
+    }
+
 
   // load value from memory at aligned address; zero extend to register width
   load_func(uint8, load, 0)
@@ -165,6 +197,35 @@ public:
   load_func(int32, guest_load, RISCV_XLATE_VIRT)
   load_func(int64, guest_load, RISCV_XLATE_VIRT)
 
+
+  // load value from memory at aligned address; zero extend to register width
+  load_func_vec(uint8, load, 0)
+  load_func_vec(uint16, load, 0)
+  load_func_vec(uint32, load, 0)
+  load_func_vec(uint64, load, 0)
+
+  // load value from guest memory at aligned address; zero extend to register width
+  load_func_vec(uint8, guest_load, RISCV_XLATE_VIRT)
+  load_func_vec(uint16, guest_load, RISCV_XLATE_VIRT)
+  load_func_vec(uint32, guest_load, RISCV_XLATE_VIRT)
+  load_func_vec(uint64, guest_load, RISCV_XLATE_VIRT)
+  load_func_vec(uint8, guest_load_x, RISCV_XLATE_VIRT|RISCV_XLATE_VIRT_HLVX)  // only for use by misaligned HLVX
+  load_func_vec(uint16, guest_load_x, RISCV_XLATE_VIRT|RISCV_XLATE_VIRT_HLVX)
+  load_func_vec(uint32, guest_load_x, RISCV_XLATE_VIRT|RISCV_XLATE_VIRT_HLVX)
+
+  // load value from memory at aligned address; sign extend to register width
+  load_func_vec(int8, load, 0)
+  load_func_vec(int16, load, 0)
+  load_func_vec(int32, load, 0)
+  load_func_vec(int64, load, 0)
+
+  // load value from guest memory at aligned address; sign extend to register width
+  load_func_vec(int8, guest_load, RISCV_XLATE_VIRT)
+  load_func_vec(int16, guest_load, RISCV_XLATE_VIRT)
+  load_func_vec(int32, guest_load, RISCV_XLATE_VIRT)
+  load_func_vec(int64, guest_load, RISCV_XLATE_VIRT)
+
+
 #ifndef RISCV_ENABLE_COMMITLOG
 # define WRITE_MEM(addr, value, size) ({})
 #else
@@ -175,7 +236,7 @@ public:
   // template for functions that store an aligned value to memory
   #define store_func(type, prefix, xlate_flags) \
     void ALWAYS_INLINE prefix##_##type(reg_t addr, type##_t val, bool actually_store=true, bool require_alignment=false) { \
-      LOG_ADDR(addr); \
+      LOG_ADDR(addr, 0);                                                  \
       if (unlikely(addr & (sizeof(type##_t)-1))) { \
         if (require_alignment) store_conditional_address_misaligned(addr); \
         else return misaligned_store(addr, val, sizeof(type##_t), xlate_flags, actually_store); \
@@ -203,6 +264,38 @@ public:
         target_endian<type##_t> target_val = to_target(val); \
         store_slow_path(addr, sizeof(type##_t), (const uint8_t*)&target_val, (xlate_flags), actually_store); \
         if (actually_store && proc) WRITE_MEM(addr, val, size); \
+      } \
+  }
+
+
+  // template for functions that store an aligned value to memory
+  #define store_func_vec(type, prefix, xlate_flags) \
+    void ALWAYS_INLINE prefix##_vec_##type(reg_t addr, type##_t val, reg_t vreg_addr, reg_t vreg_inx) { \
+      reg_t elts_per_reg = (proc->VU.VLEN >> 3) / (sizeof(type##_t));                     \
+      vreg_addr += vreg_inx / elts_per_reg;                                           \
+      LOG_ADDR(addr, vreg_addr);                                                  \
+      if (unlikely(addr & (sizeof(type##_t)-1))) { \
+        store_conditional_address_misaligned(addr); \
+      } \
+      reg_t vpn = addr >> PGSHIFT; \
+      size_t size = sizeof(type##_t); \
+      if ((xlate_flags) == 0 && likely(tlb_store_tag[vpn % TLB_ENTRIES] == vpn)) { \
+        if (proc) WRITE_MEM(addr, val, size); \
+        *(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = to_target(val); \
+      } \
+      else if ((xlate_flags) == 0 && unlikely(tlb_store_tag[vpn % TLB_ENTRIES] == (vpn | TLB_CHECK_TRIGGERS))) { \
+        if (!matched_trigger) { \
+          matched_trigger = trigger_exception(triggers::OPERATION_STORE, addr, val); \
+          if (matched_trigger) \
+            throw *matched_trigger; \
+        } \
+        if (proc) WRITE_MEM(addr, val, size); \
+        *(target_endian<type##_t>*)(tlb_data[vpn % TLB_ENTRIES].host_offset + addr) = to_target(val); \
+      } \
+      else { \
+        target_endian<type##_t> target_val = to_target(val); \
+        store_slow_path(addr, sizeof(type##_t), (const uint8_t*)&target_val, (xlate_flags), true); \
+        if (proc) WRITE_MEM(addr, val, size); \
       } \
   }
 
@@ -263,6 +356,20 @@ public:
   store_func(uint16, guest_store, RISCV_XLATE_VIRT)
   store_func(uint32, guest_store, RISCV_XLATE_VIRT)
   store_func(uint64, guest_store, RISCV_XLATE_VIRT)
+
+
+  // store value to memory at aligned address
+  store_func_vec(uint8, store, 0)
+  store_func_vec(uint16, store, 0)
+  store_func_vec(uint32, store, 0)
+  store_func_vec(uint64, store, 0)
+
+  // store value to guest memory at aligned address
+  store_func_vec(uint8, guest_store, RISCV_XLATE_VIRT)
+  store_func_vec(uint16, guest_store, RISCV_XLATE_VIRT)
+  store_func_vec(uint32, guest_store, RISCV_XLATE_VIRT)
+  store_func_vec(uint64, guest_store, RISCV_XLATE_VIRT)
+
 
   // perform an atomic memory operation at an aligned address
   amo_func(uint32)
