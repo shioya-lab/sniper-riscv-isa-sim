@@ -195,10 +195,14 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
   auto& reg = p->get_state()->log_reg_write;
 
   std::vector<reg_t>vreg_array;
+  for (auto i: reg) {
+    if ((i.first & 0xf) == 2) {
+      vreg_array.push_back(i.first >> 4);
+    }
+  }
   for (uint64_t addr_i = 0; addr_i < num_addresses; addr_i++) {
     if (std::find(vreg_array.begin(), vreg_array.end(), wr_regs[addr_i]) == vreg_array.end()) {
       vreg_array.push_back(wr_regs[addr_i]);
-      fprintf(stderr, "registered vreg : %ld\n", wr_regs[addr_i]);
     }
   }
 
