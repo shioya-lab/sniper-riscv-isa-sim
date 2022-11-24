@@ -213,14 +213,25 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       uint64_t num_mem_addr = 0;
 
       for (uint64_t addr_i = 0; addr_i < num_addresses; addr_i++) {
-        // fprintf(stderr, "vreg_wr_array[%ld]=%ld == wr_regs[%ld]=%ld\n",
-        //         vreg_idx, vreg_wr_array[vreg_idx],
-        //         addr_i, wr_regs[addr_i]);
         if (vreg_array[vreg_idx] == wr_regs[addr_i]) {
           uop_addresses[num_mem_addr++] = addresses[addr_i];
         }
       }
       p->get_state()->log_writer->Instruction(addr, size, num_mem_addr, uop_addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
+
+      std::cerr << "sift_executed_insn = " << std::hex << /* std::setw(8) << */ sift_executed_insn << '\n';
+      // One increment vd
+      char vd_origin = (sift_executed_insn >> 7) & 0x01f;
+      vd_origin++;
+      sift_executed_insn = (sift_executed_insn & ~(0x1f << 7)) | (vd_origin << 7);
+      // One increment vs1
+      char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
+      vs1_origin++;
+      sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vd_origin << 15);
+      // One increment vs2
+      char vs2_origin = (sift_executed_insn >> 20) & 0x01f;
+      vs2_origin++;
+      sift_executed_insn = (sift_executed_insn & ~(0x1f << 20)) | (vd_origin << 20);
     }
   } else {
     p->get_state()->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
