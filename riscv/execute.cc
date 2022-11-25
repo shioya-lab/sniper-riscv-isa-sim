@@ -228,10 +228,13 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
       vs1_origin++;
       sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vd_origin << 15);
-      // One increment vs2
-      char vs2_origin = (sift_executed_insn >> 20) & 0x01f;
-      vs2_origin++;
-      sift_executed_insn = (sift_executed_insn & ~(0x1f << 20)) | (vd_origin << 20);
+
+      if (num_addresses == 0) {
+        // One increment vs2
+        char vs2_origin = (sift_executed_insn >> 20) & 0x01f;
+        vs2_origin++;
+        sift_executed_insn = (sift_executed_insn & ~(0x1f << 20)) | (vd_origin << 20);
+      }
     }
   } else {
     p->get_state()->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
