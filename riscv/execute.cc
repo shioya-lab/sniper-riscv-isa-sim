@@ -219,21 +219,42 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       }
       p->get_state()->log_writer->Instruction(addr, size, num_mem_addr, uop_addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
 
-      std::cerr << "sift_executed_insn = " << std::hex << /* std::setw(8) << */ sift_executed_insn << '\n';
       // One increment vd
       char vd_origin = (sift_executed_insn >> 7) & 0x01f;
       vd_origin++;
       sift_executed_insn = (sift_executed_insn & ~(0x1f << 7)) | (vd_origin << 7);
+
+
+      bool is_opfvv_vfunary0 = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x1) &
+          (((sift_executed_insn >> 26) & 0x3f) == 0x12);
+      bool is_opfvv_vfunary1 = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x1) &
+          (((sift_executed_insn >> 26) & 0x3f) == 0x13);
+      bool is_opmvv_vxunary1 = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x2) &
+          (((sift_executed_insn >> 26) & 0x3f) == 0x13);
+      bool is_opmvv_vmunary1 = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x2) &
+          (((sift_executed_insn >> 26) & 0x3f) == 0x14);
+
       // One increment vs1
-      char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
-      vs1_origin++;
-      sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vd_origin << 15);
+      if (!is_opfvv_vfunary0 & !is_opfvv_vfunary1 &
+          !is_opmvv_vxunary1 & !is_opmvv_vmunary1) {
+        char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
+        vs1_origin++;
+        sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vs1_origin << 15);
+      }
 
       if (num_addresses == 0) {
-        // One increment vs2
-        char vs2_origin = (sift_executed_insn >> 20) & 0x01f;
-        vs2_origin++;
-        sift_executed_insn = (sift_executed_insn & ~(0x1f << 20)) | (vd_origin << 20);
+        if (is_opfvv_vfunary0 & (sift_executed_insn >> 18) & 1) { // Widening Convertion
+          // Do nothing
+        } else {
+          // One increment vs2
+          char vs2_origin = (sift_executed_insn >> 20) & 0x01f;
+          vs2_origin++;
+          sift_executed_insn = (sift_executed_insn & ~(0x1f << 20)) | (vs2_origin << 20);
+        }
       }
     }
   } else {

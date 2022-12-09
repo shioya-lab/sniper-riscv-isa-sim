@@ -192,7 +192,6 @@ extern uint32_t sift_executed_insn; // defined in execute.cc
 
 void getCode(uint8_t *dst, const uint8_t *src, uint32_t size, void* _mmu)
 {
-  std::cerr << "getCode sift_executed_insn == " << std::hex << sift_executed_insn << '\n';
   for (uint32_t i = 0 ; i < size ; ++i) {
     dst[i] = (sift_executed_insn >> (i * 8)) & 0xff;
   }
