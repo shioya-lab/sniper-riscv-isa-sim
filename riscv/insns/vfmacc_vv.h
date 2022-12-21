@@ -9,3 +9,4 @@ VI_VFP_VV_LOOP
 {
   vd = f64_mulAdd(vs1, vs2, vd);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

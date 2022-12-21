@@ -6,3 +6,4 @@ VI_VFP_VF_LOOP_WIDE
 {
   vd = f64_mul(vs2, rs1);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

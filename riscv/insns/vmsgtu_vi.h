@@ -3,3 +3,4 @@ VI_VI_ULOOP_CMP
 ({
   res = vs2 > (insn.v_simm5() & (UINT64_MAX >> (64 - P.VU.vsew)));
 })
+P.get_state()->mhpmcounter[10]->bump(1);

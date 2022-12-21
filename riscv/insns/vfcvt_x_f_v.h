@@ -5,3 +5,4 @@ VI_VFP_CVT_FP_TO_INT(
   { vd = f64_to_i64(vs2, softfloat_roundingMode, true); }, // BODY64
   int                                                      // sign
 )
+P.get_state()->mhpmcounter[10]->bump(1);

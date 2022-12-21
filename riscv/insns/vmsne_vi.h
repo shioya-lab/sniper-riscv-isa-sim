@@ -3,3 +3,4 @@ VI_VI_LOOP_CMP
 ({
   res = vs2 != simm5;
 })
+P.get_state()->mhpmcounter[10]->bump(1);

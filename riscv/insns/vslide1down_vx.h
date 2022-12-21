@@ -42,3 +42,4 @@ if (i != vl - 1) {
   }
 }
 VI_LOOP_END
+P.get_state()->mhpmcounter[10]->bump(1);

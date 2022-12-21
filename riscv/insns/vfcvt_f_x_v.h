@@ -5,3 +5,4 @@ VI_VFP_CVT_INT_TO_FP(
   { vd = i64_to_f64(vs2); }, // BODY64
   int                        // sign
 )
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -29,3 +29,4 @@ for (reg_t i = P.VU.vstart->read() ; i < P.VU.vl->read(); ++i) {
 }
 
 P.VU.vstart->write(0);
+P.get_state()->mhpmcounter[10]->bump(1);

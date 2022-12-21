@@ -10,3 +10,4 @@ VI_VFP_VV_LOOP_REDUCTION
 {
   vd_0 = f64_max(vd_0, vs2);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

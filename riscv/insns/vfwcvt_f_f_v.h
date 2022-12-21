@@ -7,3 +7,4 @@ VI_VFP_WCVT_FP_TO_FP(
   { require_extension(EXT_ZFH); }, // CHECK16
   { require_extension('D'); }      // CHECK32
 )
+P.get_state()->mhpmcounter[10]->bump(1);

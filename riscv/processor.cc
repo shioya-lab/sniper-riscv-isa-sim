@@ -264,7 +264,10 @@ void state_t::reset(processor_t* const proc, reg_t max_isa, mmu_t *mmu, uint32_t
     auto mevent = std::make_shared<const_csr_t>(proc, which_mevent, 0);
     auto mcounter = std::make_shared<const_csr_t>(proc, which_mcounter, 0);
     csrmap[which_mevent] = mevent;
-    csrmap[which_mcounter] = mcounter;
+
+    // csrmap[which_mcounter] = mcounter;
+    mhpmcounter[i] = std::make_shared<wide_counter_csr_t>(proc, which_counter);
+    csrmap[which_mcounter] = mhpmcounter[i];
 
     if (proc->extension_enabled_const(EXT_ZICNTR) && proc->extension_enabled_const(EXT_ZIHPM)) {
       auto counter = std::make_shared<counter_proxy_csr_t>(proc, which_counter, mcounter);

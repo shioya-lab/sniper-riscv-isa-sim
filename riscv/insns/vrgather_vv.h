@@ -30,3 +30,4 @@ VI_LOOP_BASE
   }
   }
 VI_LOOP_END;
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -186,7 +186,7 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
 #ifdef RISCV_ENABLE_SIFT
   uint64_t addr = pc;
   uint64_t size = insn.length();
-  uint8_t  num_addresses = p->get_state()->log_addr_valid;
+  uint64_t num_addresses = p->get_state()->log_addr_valid;
   uint64_t *addresses = p->get_state()->log_addr;
   reg_t    *wr_regs = p->get_state()->log_reg_addr;
   bool     is_branch = p->get_state()->log_is_branch;
@@ -208,7 +208,7 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
 
   if (vreg_array.size() > 0) {
     for (reg_t vreg_idx = 0; vreg_idx < vreg_array.size(); vreg_idx++) {
-      uint64_t uop_addresses[128];
+      uint64_t uop_addresses[1024];
 
       uint64_t num_mem_addr = 0;
 
@@ -238,9 +238,12 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
           (((sift_executed_insn >> 12) & 0x7) == 0x2) &
           (((sift_executed_insn >> 26) & 0x3f) == 0x14);
 
+      bool is_opivi = (sift_executed_insn & 0x7f) == 0x57;
+
       // One increment vs1
       if (!is_opfvv_vfunary0 & !is_opfvv_vfunary1 &
-          !is_opmvv_vxunary1 & !is_opmvv_vmunary1) {
+          !is_opmvv_vxunary1 & !is_opmvv_vmunary1 &
+          !is_opivi) {
         char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
         vs1_origin++;
         sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vs1_origin << 15);

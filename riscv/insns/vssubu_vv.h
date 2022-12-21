@@ -28,3 +28,4 @@ default: {
 P_SET_OV(sat);
 
 VI_LOOP_END
+P.get_state()->mhpmcounter[10]->bump(1);

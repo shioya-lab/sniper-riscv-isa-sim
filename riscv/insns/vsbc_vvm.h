@@ -3,3 +3,4 @@ VI_VV_LOOP_WITH_CARRY
 ({
   vd = (uint128_t)((op_mask & vs2) - (op_mask & vs1) - carry);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

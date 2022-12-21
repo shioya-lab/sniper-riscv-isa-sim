@@ -9,3 +9,4 @@ VI_VFP_VF_LOOP_CMP
 {
   res = f64_le(rs1, vs2);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

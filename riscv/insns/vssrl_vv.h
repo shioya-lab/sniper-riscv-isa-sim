@@ -8,3 +8,4 @@ VI_VV_ULOOP
   INT_ROUNDING(val, xrm, sh);
   vd = val >> sh;
 })
+P.get_state()->mhpmcounter[10]->bump(1);

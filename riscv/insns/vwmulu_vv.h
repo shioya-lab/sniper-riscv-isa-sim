@@ -4,3 +4,4 @@ VI_VV_LOOP_WIDEN
 ({
   VI_WIDE_OP_AND_ASSIGN(vs2, vs1, 0, *, +, uint);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -9,3 +9,4 @@ VI_VFP_V_LOOP
 {
   vd = f64_sqrt(vs2);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -8,3 +8,4 @@ VI_VFP_WCVT_FP_TO_INT(
   { require_extension('F'); },                              // CHECK32
   uint                                                      // sign
 )
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -9,3 +9,4 @@ VI_VV_ULOOP
 
   P_SET_OV(sat);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -22,3 +22,4 @@ VI_VV_LOOP
 
   vd = result;
 })
+P.get_state()->mhpmcounter[10]->bump(1);

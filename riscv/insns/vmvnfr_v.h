@@ -26,3 +26,4 @@ if (vd != vs2 && start < size) {
 }
 
 P.VU.vstart->write(0);
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -7,3 +7,4 @@ VI_VV_ULOOP
     vd = vs2;
   }
 })
+P.get_state()->mhpmcounter[10]->bump(1);

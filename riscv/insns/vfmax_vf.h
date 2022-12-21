@@ -9,3 +9,4 @@ VI_VFP_VF_LOOP
 {
   vd = f64_max(vs2, rs1);
 })
+P.get_state()->mhpmcounter[10]->bump(1);

@@ -6,3 +6,4 @@ VI_VV_ULOOP
   else
     vd = vs2 / vs1;
 })
+P.get_state()->mhpmcounter[10]->bump(1);

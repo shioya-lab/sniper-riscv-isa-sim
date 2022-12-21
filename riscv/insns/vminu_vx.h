@@ -8,3 +8,4 @@ VI_VX_ULOOP
   }
 
 })
+P.get_state()->mhpmcounter[10]->bump(1);

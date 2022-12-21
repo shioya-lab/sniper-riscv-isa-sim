@@ -144,6 +144,7 @@ struct state_t
   csr_t_p mcause;
   wide_counter_csr_t_p minstret;
   wide_counter_csr_t_p mcycle;
+  wide_counter_csr_t_p mhpmcounter[32];
   mie_csr_t_p mie;
   mip_csr_t_p mip;
   csr_t_p medeleg;
@@ -226,8 +227,8 @@ struct state_t
   uint32_t log_id = 0;
   int log_reset_count = 0;
   Sift::Writer *log_writer = nullptr;
-  reg_t log_addr[128];
-  reg_t log_reg_addr[128];
+  reg_t log_addr[1024];
+  reg_t log_reg_addr[1024];
   unsigned int log_addr_valid;
   bool log_is_branch;
   bool log_is_branch_taken;
