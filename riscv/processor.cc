@@ -517,7 +517,7 @@ void state_t::reset(processor_t* const proc, reg_t max_isa, mmu_t *mmu, uint32_t
   //filename += ".sift";
   std::string filename = sift_filename;
   // log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(proc->debug_mmu));;
-  log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));
+  log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "response", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));
 #endif // RISCV_ENABLE_SIFT
 
 #ifdef RISCV_ENABLE_COMMITLOG
