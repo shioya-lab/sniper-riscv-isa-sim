@@ -206,6 +206,8 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
     }
   }
 
+  std::sort(vreg_array.begin(), vreg_array.end() );
+
   if (vreg_array.size() > 0) {
     for (reg_t vreg_idx = 0; vreg_idx < vreg_array.size(); vreg_idx++) {
       uint64_t uop_addresses[1024];
@@ -215,6 +217,7 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       for (uint64_t addr_i = 0; addr_i < num_addresses; addr_i++) {
         if (vreg_array[vreg_idx] == wr_regs[addr_i]) {
           uop_addresses[num_mem_addr++] = addresses[addr_i];
+          // fprintf (stderr, "vreg = %d, address set to %08lx\n", vreg_array[vreg_idx], addresses[addr_i]);
         }
       }
       p->get_state()->log_writer->Instruction(addr, size, num_mem_addr, uop_addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
@@ -222,7 +225,9 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       // One increment vd
       char vd_origin = (sift_executed_insn >> 7) & 0x01f;
       vd_origin++;
+      // fprintf(stderr, "Before sift_executed_insn = %08lx\n", sift_executed_insn);
       sift_executed_insn = (sift_executed_insn & ~(0x1f << 7)) | (vd_origin << 7);
+      // fprintf(stderr, "After sift_executed_insn = %08lx\n", sift_executed_insn);
 
 
       bool is_opfvv_vfunary0 = ((sift_executed_insn & 0x7f) == 0x57) &
@@ -240,16 +245,16 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
 
       bool is_opivi = (sift_executed_insn & 0x7f) == 0x57;
 
-      // One increment vs1
-      if (!is_opfvv_vfunary0 & !is_opfvv_vfunary1 &
-          !is_opmvv_vxunary1 & !is_opmvv_vmunary1 &
-          !is_opivi) {
-        char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
-        vs1_origin++;
-        sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vs1_origin << 15);
-      }
-
       if (num_addresses == 0) {
+        // One increment vs1
+        if (!is_opfvv_vfunary0 & !is_opfvv_vfunary1 &
+            !is_opmvv_vxunary1 & !is_opmvv_vmunary1 &
+            !is_opivi) {
+          char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
+          vs1_origin++;
+          sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vs1_origin << 15);
+        }
+
         if (is_opfvv_vfunary0 & (sift_executed_insn >> 18) & 1) { // Widening Convertion
           // Do nothing
         } else {
@@ -262,6 +267,12 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
     }
   } else {
     p->get_state()->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
+    if (sift_executed_insn == 0x00100013) {
+      p->get_state()->log_writer->Magic (1, 0, 0);
+    }
+    if (sift_executed_insn == 0x00200013) {
+      p->get_state()->log_writer->Magic (2, 0, 0);
+    }
   }
 
   // p->get_state()->log_addr = 0;
