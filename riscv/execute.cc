@@ -15,6 +15,9 @@ static void commit_log_reset(processor_t* p)
   p->get_state()->log_reg_write.clear();
   p->get_state()->log_mem_read.clear();
   p->get_state()->log_mem_write.clear();
+  p->get_state()->log_addr_valid = 0;
+  p->get_state()->log_is_branch = false;
+  p->get_state()->log_is_branch_taken = false;
 }
 
 static void commit_log_stash_privilege(processor_t* p)
@@ -214,6 +217,8 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
 
       uint64_t num_mem_addr = 0;
 
+      // fprintf (stderr, "vreg_array.size() = %d, vreg_idx = %d\n", vreg_array.size(), vreg_array[vreg_idx]);
+
       for (uint64_t addr_i = 0; addr_i < num_addresses; addr_i++) {
         if (vreg_array[vreg_idx] == wr_regs[addr_i]) {
           uop_addresses[num_mem_addr++] = addresses[addr_i];
@@ -243,18 +248,25 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
           (((sift_executed_insn >> 12) & 0x7) == 0x2) &
           (((sift_executed_insn >> 26) & 0x3f) == 0x14);
 
-      bool is_opivi = (sift_executed_insn & 0x7f) == 0x57;
+      bool is_vlx_indexed = ((sift_executed_insn & 0x7f) == 0x07) & (((sift_executed_insn >> 26) & 0x1) == 1);
+      bool is_vsx_indexed = ((sift_executed_insn & 0x7f) == 0x27) & (((sift_executed_insn >> 26) & 0x1) == 1);
 
-      if (num_addresses == 0) {
-        // One increment vs1
-        if (!is_opfvv_vfunary0 & !is_opfvv_vfunary1 &
-            !is_opmvv_vxunary1 & !is_opmvv_vmunary1 &
-            !is_opivi) {
-          char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
-          vs1_origin++;
-          sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vs1_origin << 15);
-        }
+      bool is_opivi = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x3);
 
+      // One increment vs1
+      if ((num_addresses == 0) &  // not memory instruction
+          !is_opfvv_vfunary0 & !is_opfvv_vfunary1 &
+          !is_opmvv_vxunary1 & !is_opmvv_vmunary1 &
+          !is_opivi) {
+        char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
+        vs1_origin++;
+        sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vs1_origin << 15);
+      }
+
+      if (num_addresses == 0 ||  // arithmetic instruction
+          is_vlx_indexed ||
+          is_vsx_indexed) {
         if (is_opfvv_vfunary0 & (sift_executed_insn >> 18) & 1) { // Widening Convertion
           // Do nothing
         } else {
