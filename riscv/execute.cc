@@ -234,6 +234,12 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       sift_executed_insn = (sift_executed_insn & ~(0x1f << 7)) | (vd_origin << 7);
       // fprintf(stderr, "After sift_executed_insn = %08lx\n", sift_executed_insn);
 
+      bool is_opivx = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x4);
+      bool is_opfvf = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x5);
+      bool is_opmvx = ((sift_executed_insn & 0x7f) == 0x57) &
+          (((sift_executed_insn >> 12) & 0x7) == 0x6);
 
       bool is_opfvv_vfunary0 = ((sift_executed_insn & 0x7f) == 0x57) &
           (((sift_executed_insn >> 12) & 0x7) == 0x1) &
@@ -258,7 +264,7 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       if ((num_addresses == 0) &  // not memory instruction
           !is_opfvv_vfunary0 & !is_opfvv_vfunary1 &
           !is_opmvv_vxunary1 & !is_opmvv_vmunary1 &
-          !is_opivi) {
+          !is_opivx & !is_opfvf & !is_opmvx & !is_opivi) {
         char vs1_origin = (sift_executed_insn >> 15) & 0x01f;
         vs1_origin++;
         sift_executed_insn = (sift_executed_insn & ~(0x1f << 15)) | (vs1_origin << 15);
