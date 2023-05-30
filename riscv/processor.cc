@@ -517,7 +517,16 @@ void state_t::reset(processor_t* const proc, reg_t max_isa, mmu_t *mmu, uint32_t
   //filename += ".sift";
   std::string filename = sift_filename;
   // log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "", 0, false, true, false, getCode, reinterpret_cast<void*>(proc->debug_mmu));;
-  log_writer = new Sift::Writer(filename.c_str(), nullptr, true, "response", 0, false, true, false, getCode, reinterpret_cast<void*>(mmu));
+  log_writer = new Sift::Writer(filename.c_str(), // filename
+                                nullptr, // getCodeFunc
+                                true, // useCompression
+                                "response", // response_filename
+                                0, // id
+                                false, // arch32
+                                true, // require_icache_per_insn
+                                false, // send_va2pa_mapping
+                                getCode, // getCodeFunc2
+                                reinterpret_cast<void*>(mmu));
 #endif // RISCV_ENABLE_SIFT
 
 #ifdef RISCV_ENABLE_COMMITLOG

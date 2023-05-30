@@ -273,7 +273,8 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       if (num_addresses == 0 ||  // arithmetic instruction
           is_vlx_indexed ||
           is_vsx_indexed) {
-        if (is_opfvv_vfunary0 & (sift_executed_insn >> 18) & 1) { // Widening Convertion
+        if (is_opfvv_vfunary0 & (sift_executed_insn >> 18) & 1 || // Widening Convertion
+            (MASK_VMV_V_X & sift_executed_insn) == MATCH_VMV_V_X) {  // VMV_V_X
           // Do nothing
         } else {
           // One increment vs2
