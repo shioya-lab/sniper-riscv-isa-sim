@@ -287,10 +287,19 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
   } else {
     p->get_state()->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
     if (sift_executed_insn == 0x00100013) {
-      p->get_state()->log_writer->Magic (1, 0, 0);
+      p->get_state()->log_writer->Magic (1, 0, 0);   // SIM_ROI_START = 1 at sim_api.h
     }
-    if (sift_executed_insn == 0x00200013) {
-      p->get_state()->log_writer->Magic (2, 0, 0);
+    if (sift_executed_insn == 0x00200013) { 
+      p->get_state()->log_writer->Magic (2, 0, 0);   // SIM_ROI_END = 2 at sim_api.h
+    }
+    if ((sift_executed_insn & MASK_VSETVLI) == MATCH_VSETVLI ||
+        (sift_executed_insn & MASK_VSETIVLI) == MATCH_VSETIVLI ||
+        (sift_executed_insn & MASK_VSETVL)   == MATCH_VSETVL) {
+      auto vl = p->VU.vl;
+      auto vtype = p->VU.vtype;
+      auto vl_value = vl->read();
+      auto vtype_value = vtype->read();
+      p->get_state()->log_writer->Magic(5, vl_value, vtype_value);  // SIM_CMD_USER = 5 at sim_api.h
     }
   }
 
