@@ -227,8 +227,8 @@ struct state_t
   uint32_t log_id = 0;
   int log_reset_count = 0;
   Sift::Writer *log_writer = nullptr;
-  reg_t log_addr[1024];
-  reg_t log_reg_addr[1024];
+  reg_t log_addr[4096];
+  reg_t log_reg_addr[4096];
   unsigned int log_addr_valid;
   bool log_is_branch;
   bool log_is_branch_taken;
