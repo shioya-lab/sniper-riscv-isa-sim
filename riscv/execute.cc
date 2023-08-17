@@ -184,6 +184,50 @@ inline void processor_t::update_histogram(reg_t pc)
 
 
 
+static void log_print_mem_access (processor_t *p, reg_t pc, insn_t insn)
+{
+  auto& load = p->get_state()->log_mem_read;
+  auto& store = p->get_state()->log_mem_write;
+
+  const reg_t VEC_ARITH_MATCH = 0x57;
+  const reg_t VEC_LOAD_MATCH  = 0x07;
+  const reg_t VEC_STORE_MATCH = 0x27;
+
+  bool is_vector = false;
+
+  auto insn_bit = insn.bits();
+  if ((insn_bit & 0x7f) == VEC_ARITH_MATCH ||
+      (insn_bit & 0x7f) == VEC_LOAD_MATCH  ||
+      (insn_bit & 0x7f) == VEC_STORE_MATCH) {
+    is_vector = true;
+  }
+
+  reg_t minstret = p->get_state()->minstret->read();
+  for (auto item : store) {
+    auto addr = std::get<0>(item);
+    if (p->addr_history.find(addr) == p->addr_history.end()) {
+      p->addr_history[addr] = new processor_t::period_info_t(new processor_t::period_t(minstret, is_vector));
+    } else {
+      p->addr_history[addr]->set_last_access (minstret);
+    }
+  }
+
+  for (auto item : load) {
+    auto addr = std::get<0>(item);
+    if (p->addr_history.find(addr) == p->addr_history.end()) {
+      p->addr_history[addr] = new processor_t::period_info_t(new processor_t::period_t(minstret, is_vector));
+    } else {
+      auto last_access = p->addr_history[addr]->get_last_access();
+      if (addr == 0x0041ad20) {
+        fprintf (stderr, "set 0x004ad20, last_access = %ld, current_access = %ld, period = %ld\n",
+                 last_access, minstret, minstret - last_access);
+      }
+      p->addr_history[addr]->get_period_list()->push_back(new processor_t::period_t(minstret - last_access, is_vector));
+      p->addr_history[addr]->set_last_access (minstret);
+    }
+  }
+}
+
 static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
 {
 #ifdef RISCV_ENABLE_SIFT
@@ -289,7 +333,7 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
     if (sift_executed_insn == 0x00100013) {
       p->get_state()->log_writer->Magic (1, 0, 0);   // SIM_ROI_START = 1 at sim_api.h
     }
-    if (sift_executed_insn == 0x00200013) { 
+    if (sift_executed_insn == 0x00200013) {
       p->get_state()->log_writer->Magic (2, 0, 0);   // SIM_ROI_END = 2 at sim_api.h
     }
     if ((sift_executed_insn & MASK_VSETVLI) == MATCH_VSETVLI ||
@@ -332,7 +376,8 @@ static inline reg_t execute_insn(processor_t* p, reg_t pc, insn_fetch_t fetch)
         commit_log_print_insn(p, pc, fetch.insn);
       }
 #endif
-
+      
+      log_print_mem_access(p, pc, fetch.insn);
       log_print_sift_trace(p, pc, fetch.insn);
 
     }

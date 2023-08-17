@@ -86,6 +86,16 @@ processor_t::~processor_t()
   }
 #endif
 
+  fprintf(stderr, "Address Access History:%zu\n", addr_history.size());
+  for (auto it : addr_history) {
+    auto period_list = (it.second)->get_period_list();
+    fprintf(stderr, "%ld %08lx ", period_list->size(), it.first);
+    for (auto p : *period_list) {
+      fprintf(stderr, "%ld(%d), ", p->period(), p->is_vector());
+    }
+    fprintf(stderr, "\n");
+  }
+
   delete mmu;
   delete disassembler;
 }

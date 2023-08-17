@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <map>
 #include <cassert>
+#include <vector>
 #include "debug_rom_defines.h"
 #include "entropy_source.h"
 #include "csrs.h"
@@ -405,6 +406,41 @@ public:
   reg_t n_pmp;
   reg_t lg_pmp_granularity;
   reg_t pmp_tor_mask() { return -(reg_t(1) << (lg_pmp_granularity - PMP_SHIFT)); }
+
+  class period_t {
+    reg_t m_period;
+    bool  m_is_vector;
+
+    public:
+    period_t (reg_t period, bool is_vector)
+    : m_period(period), m_is_vector(is_vector) {}
+
+    reg_t period() { return m_period; }
+    bool  is_vector () { return m_is_vector; }
+
+  };
+
+  class period_info_t {
+    reg_t m_last_access;
+    std::vector<period_t *> *m_period_list;
+
+    public:
+    period_info_t (period_t *period) {
+      m_period_list = new std::vector<period_t *>();
+      m_period_list->push_back(period);
+    }
+
+    std::vector<period_t *>* get_period_list() {
+      return m_period_list;
+    }
+
+    void set_last_access (reg_t last_access) {
+      m_last_access = last_access;
+    }
+
+    reg_t get_last_access () { return m_last_access; }
+  };
+  std::map<uint64_t, period_info_t *> addr_history;
 
   class vectorUnit_t {
     public:
