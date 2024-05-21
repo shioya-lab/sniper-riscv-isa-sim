@@ -224,6 +224,7 @@ struct state_t
 
 #ifdef RISCV_ENABLE_SIFT
   const char* sift_filename = nullptr;
+  bool m_inside_roi = false;
   uint32_t log_id = 0;
   int log_reset_count = 0;
   Sift::Writer *log_writer = nullptr;

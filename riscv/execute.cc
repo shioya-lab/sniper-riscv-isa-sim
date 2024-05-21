@@ -187,6 +187,16 @@ inline void processor_t::update_histogram(reg_t pc)
 static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
 {
 #ifdef RISCV_ENABLE_SIFT
+  if (!p->get_state()->m_inside_roi) {
+    if (sift_executed_insn == 0x00100013) {  // ROI start
+    } else {
+      p->get_state()->log_addr_valid = 0;
+      p->get_state()->log_is_branch = false;
+      p->get_state()->log_is_branch_taken = false;
+      return;
+    }
+  }
+
   uint64_t addr = pc;
   uint64_t size = insn.length();
   uint64_t num_addresses = p->get_state()->log_addr_valid;
@@ -232,7 +242,7 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
       vd_origin++;
       // fprintf(stderr, "Before sift_executed_insn = %08lx\n", sift_executed_insn);
       sift_executed_insn = (sift_executed_insn & ~(0x1f << 7)) | (vd_origin << 7);
-      // fprintf(stderr, "After sift_executed_insn = %08lx\n", sift_executed_insn);
+      // fprintf(stderr, "After  sift_executed_insn = %08lx\n", sift_executed_insn);
 
       bool is_opivx = ((sift_executed_insn & 0x7f) == 0x57) &
           (((sift_executed_insn >> 12) & 0x7) == 0x4);
@@ -288,9 +298,11 @@ static void log_print_sift_trace(processor_t* p, reg_t pc, insn_t insn)
     p->get_state()->log_writer->Instruction(addr, size, num_addresses, addresses, is_branch, taken, 0 /*is_predicate*/, 1 /*executed*/);
     if (sift_executed_insn == 0x00100013) {
       p->get_state()->log_writer->Magic (1, 0, 0);   // SIM_ROI_START = 1 at sim_api.h
+      p->get_state()->m_inside_roi = true;
     }
-    if (sift_executed_insn == 0x00200013) { 
+    if (sift_executed_insn == 0x00200013) {
       p->get_state()->log_writer->Magic (2, 0, 0);   // SIM_ROI_END = 2 at sim_api.h
+      p->get_state()->m_inside_roi = false;
     }
     if ((sift_executed_insn & MASK_VSETVLI) == MATCH_VSETVLI ||
         (sift_executed_insn & MASK_VSETIVLI) == MATCH_VSETIVLI ||
