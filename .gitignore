@@ -4,4 +4,6 @@ autom4te.cache/
 .*.swp
 *.o
 *.d
+/*.cc
+/*.h
 .gdb_history
